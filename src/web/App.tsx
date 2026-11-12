@@ -1,39 +1,26 @@
-import type { JsonAgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
-import type { ClientMessage, ServerMessage } from "../shared/protocol.ts";
+import { type AgentMessage, applyEvent } from "../shared/chat-state.ts";
+import type { ClientMessage, ServerMessage, SessionSnapshot } from "../shared/protocol.ts";
 
-type Item = { kind: "user" | "assistant" | "tool" | "info" | "error"; text: string };
-type AgentMessage = Extract<JsonAgentSessionEvent, { type: "message_end" }>["message"];
-
-function textOf(message: Extract<AgentMessage, { role: "user" | "assistant" }>): string {
-  if (typeof message.content === "string") return message.content;
-  return message.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("");
-}
-
-function applyEvent(items: Item[], event: JsonAgentSessionEvent): Item[] {
-  switch (event.type) {
-    case "message_start":
-      if (event.message.role === "user") return [...items, { kind: "user", text: textOf(event.message) }];
-      if (event.message.role === "assistant") return [...items, { kind: "assistant", text: "" }];
-      return items;
-    case "message_update": {
-      // The streaming assistant message is always the last item.
-      const update = event.assistantMessageEvent;
-      if (update.type !== "text_delta") return items;
-      const last = items[items.length - 1];
-      return [...items.slice(0, -1), { ...last, text: last.text + update.delta }];
-    }
-    case "message_end": {
-      // Replace the streamed text with the final message.
-      if (event.message.role !== "assistant") return items;
-      const final: Item[] = [...items.slice(0, -1), { kind: "assistant", text: textOf(event.message) }];
-      return event.message.errorMessage ? [...final, { kind: "error", text: event.message.errorMessage }] : final;
-    }
-    case "tool_execution_start":
-      return [...items, { kind: "tool", text: event.toolName }];
-    default:
-      return items;
+function MessageView({ message }: { message: AgentMessage }) {
+  if (message.role === "user") {
+    const text =
+      typeof message.content === "string"
+        ? message.content
+        : message.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("");
+    return <div className="item user">{text}</div>;
   }
+  if (message.role !== "assistant") return null;
+  return (
+    <>
+      {message.content.map((block, index) => {
+        if (block.type === "text") return <div key={index} className="item assistant">{block.text}</div>;
+        if (block.type === "toolCall") return <div key={index} className="item tool">▸ {block.name}</div>;
+        return null;
+      })}
+      {message.errorMessage && <div className="item error">{message.errorMessage}</div>}
+    </>
+  );
 }
 
 export function App() {
@@ -41,39 +28,31 @@ export function App() {
   const endRef = useRef<HTMLDivElement>(null);
   const [connected, setConnected] = useState(false);
   const [cwd, setCwd] = useState("");
-  const [sessionCwd, setSessionCwd] = useState<string | null>(null);
-  const [running, setRunning] = useState(false);
-  const [items, setItems] = useState<Item[]>([]);
+  const [session, setSession] = useState<SessionSnapshot | null>(null);
+  const [errors, setErrors] = useState<string[]>([]);
   const [text, setText] = useState("");
+  const running = session?.state.running ?? false;
 
   useEffect(() => {
     const socket = new WebSocket(`ws://${location.host}/ws`);
     socket.onopen = () => setConnected(true);
     socket.onclose = () => {
       setConnected(false);
-      setSessionCwd(null);
-      setRunning(false);
+      setSession(null);
     };
     socket.onmessage = (message) => {
       const data = JSON.parse(message.data) as ServerMessage;
       switch (data.type) {
-        case "started":
-          setSessionCwd(data.cwd);
-          setRunning(false);
-          setItems([{ kind: "info", text: `Session started in ${data.cwd}` }]);
+        case "snapshot":
+          setSession(data.session);
+          setErrors([]);
+          if (data.session) setCwd(data.session.cwd);
           break;
         case "event":
-          if (data.event.type === "agent_start") setRunning(true);
-          if (data.event.type === "agent_settled") setRunning(false);
-          setItems((current) => applyEvent(current, data.event));
-          break;
-        case "exited":
-          setSessionCwd(null);
-          setRunning(false);
-          setItems((current) => [...current, { kind: "info", text: `Pi exited with code ${data.code}` }]);
+          setSession((current) => current && { ...current, state: applyEvent(current.state, data.event) });
           break;
         case "error":
-          setItems((current) => [...current, { kind: "error", text: data.message }]);
+          setErrors((current) => [...current, data.message]);
           break;
       }
     };
@@ -86,14 +65,14 @@ export function App() {
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });
-  }, [items]);
+  }, [session, errors]);
 
   function send(message: ClientMessage) {
     socketRef.current?.send(JSON.stringify(message));
   }
 
   function submit() {
-    if (!sessionCwd || running || !text.trim()) return;
+    if (!session || running || !text.trim()) return;
     send({ type: "prompt", text });
     setText("");
   }
@@ -120,9 +99,12 @@ export function App() {
       </header>
       {!connected && <div className="status">Not connected. Run npm run dev:server, then reload this page.</div>}
       <main className="output">
-        {items.map((item, index) => (
-          <div key={index} className={`item ${item.kind}`}>
-            {item.kind === "tool" ? `▸ ${item.text}` : item.text}
+        {session && <div className="item info">Session in {session.cwd}</div>}
+        {session?.state.messages.map((message, index) => <MessageView key={index} message={message} />)}
+        {session?.state.streaming && <MessageView message={session.state.streaming} />}
+        {errors.map((error, index) => (
+          <div key={index} className="item error">
+            {error}
           </div>
         ))}
         <div ref={endRef} />
@@ -132,11 +114,11 @@ export function App() {
           value={text}
           onChange={(event) => setText(event.target.value)}
           onKeyDown={onKeyDown}
-          placeholder={sessionCwd ? "Message Pi (Enter to send, Shift+Enter for a new line)" : "Start a session first"}
-          disabled={!sessionCwd}
+          placeholder={session ? "Message Pi (Enter to send, Shift+Enter for a new line)" : "Start a session first"}
+          disabled={!session}
           rows={3}
         />
-        <button onClick={submit} disabled={!sessionCwd || running || !text.trim()}>
+        <button onClick={submit} disabled={!session || running || !text.trim()}>
           Send
         </button>
         <button onClick={() => send({ type: "abort" })} disabled={!running}>

@@ -1,4 +1,5 @@
 import type { JsonAgentSessionEvent } from "@earendil-works/pi-coding-agent";
+import type { ChatState } from "./chat-state.ts";
 
 /** Messages from the browser to the server. */
 export type ClientMessage =
@@ -6,9 +7,10 @@ export type ClientMessage =
   | { type: "prompt"; text: string }
   | { type: "abort" };
 
+export type SessionSnapshot = { cwd: string; state: ChatState };
+
 /** Messages from the server to the browser. */
 export type ServerMessage =
-  | { type: "started"; cwd: string }
+  | { type: "snapshot"; session: SessionSnapshot | null }
   | { type: "event"; event: JsonAgentSessionEvent }
-  | { type: "exited"; code: number | null }
   | { type: "error"; message: string };
