@@ -1,0 +1,108 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: system-ui, sans-serif;
+  background: #1e1f22;
+  color: #dcdde0;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.bar {
+  display: flex;
+  gap: 8px;
+  padding: 8px;
+  background: #2b2d31;
+}
+
+.bar input,
+.bar textarea {
+  flex: 1;
+  font: inherit;
+  padding: 6px 8px;
+  color: inherit;
+  background: #1e1f22;
+  border: 1px solid #44464d;
+  border-radius: 4px;
+}
+
+.bar textarea {
+  resize: vertical;
+}
+
+button {
+  font: inherit;
+  padding: 6px 14px;
+  color: white;
+  background: #5865f2;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.status {
+  padding: 6px 8px;
+  background: #5c2b2b;
+}
+
+.output {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  overflow-y: auto;
+}
+
+.item {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.item:empty {
+  display: none;
+}
+
+.user {
+  align-self: flex-end;
+  max-width: 80%;
+  padding: 8px 12px;
+  background: #3a3d44;
+  border-radius: 8px;
+}
+
+.assistant {
+  line-height: 1.5;
+}
+
+.tool {
+  font-family: ui-monospace, monospace;
+  color: #8a8f98;
+}
+
+.info {
+  color: #8a8f98;
+  font-style: italic;
+}
+
+.error {
+  color: #f28b82;
+}
