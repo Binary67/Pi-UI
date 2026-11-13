@@ -23,6 +23,8 @@ export type FolderListing = { path: string; parent: string; folders: { name: str
 /** Messages from the server to the browser. */
 export type ServerMessage =
   | { type: "snapshot"; session: SessionSnapshot | null }
+  /** A new Pi process starts. The next snapshot or error ends the wait. */
+  | { type: "starting" }
   | { type: "projects"; projects: Project[] }
   | { type: "folders"; listing: FolderListing }
   | { type: "event"; event: JsonAgentSessionEvent }

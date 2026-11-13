@@ -69,6 +69,29 @@ export function Working() {
   );
 }
 
+const SKELETON_LINES = ["100%", "90%", "60%"];
+
+/** A grey outline of the chat screen, shown while a new Pi process starts. */
+export function Skeleton() {
+  return (
+    <>
+      <main className="thread" aria-busy="true" aria-label="Loading session">
+        <div className="column">
+          <div className="skeleton skeleton-bubble" />
+          {SKELETON_LINES.map((width) => (
+            <div key={width} className="skeleton skeleton-line" style={{ width }} />
+          ))}
+        </div>
+      </main>
+      <div className="dock">
+        <div className="column">
+          <div className="skeleton skeleton-composer" />
+        </div>
+      </div>
+    </>
+  );
+}
+
 function CopyButton({ getText, label }: { getText: () => string; label?: string }) {
   const [copied, setCopied] = useState(false);
 

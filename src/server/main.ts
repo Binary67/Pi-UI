@@ -45,30 +45,43 @@ async function start(folder: string, file?: string): Promise<void> {
   addProject(cwd);
   await broadcastProjects();
 
-  const pi = new PiProcess(
-    cwd,
-    file ? ["--session", file] : [],
-    (event) => {
-      if (session?.pi !== pi) return;
-      session.state = applyEvent(session.state, event);
-      broadcast({ type: "event", event });
-      // Pi saves the session file when the first user message ends. From then on, the sidebar can list it.
-      if (event.type === "message_end" && event.message.role === "user") {
-        keepSession(session.cwd, session.file);
-        void broadcastProjects();
-      }
-    },
-    (code) => {
-      if (session?.pi !== pi) return;
-      session = undefined;
-      broadcast(snapshot());
-      broadcast({ type: "error", message: `Pi exited with code ${code}` });
-    },
-  );
+  // A running Pi switches sessions in place, as /new and /resume do. Pi takes the folder of an opened session from
+  // its file. It starts a new session only in its own folder, so a new session in another folder needs a new process.
+  const reuse = session && (file || session.cwd === cwd) ? session.pi : undefined;
+  if (!reuse) broadcast({ type: "starting" });
+  const pi: PiProcess =
+    reuse ??
+    new PiProcess(
+      cwd,
+      file ? ["--session", file] : [],
+      (event) => {
+        if (session?.pi !== pi) return;
+        session.state = applyEvent(session.state, event);
+        broadcast({ type: "event", event });
+        // Pi saves the session file when the first user message ends. From then on, the sidebar can list it.
+        if (event.type === "message_end" && event.message.role === "user") {
+          keepSession(session.cwd, session.file);
+          void broadcastProjects();
+        }
+      },
+      (code) => {
+        if (session?.pi !== pi) return;
+        session = undefined;
+        broadcast(snapshot());
+        broadcast({ type: "error", message: `Pi exited with code ${code}` });
+      },
+    );
+  if (reuse) {
+    const { data } = file
+      ? await pi.send({ type: "switch_session", sessionPath: file })
+      : await pi.send({ type: "new_session" });
+    // An extension can cancel the switch. Then the current session stays.
+    if (data.cancelled) return;
+  }
   const state = await pi.send({ type: "get_state" });
   const history = await pi.send({ type: "get_messages" });
-  // Stop the previous session only now, so it keeps working until the new one is ready.
-  session?.pi.stop();
+  // Stop the previous process only now, so it keeps working until the new one is ready.
+  if (session?.pi !== pi) session?.pi.stop();
   session = {
     cwd,
     file: state.data.sessionFile!,
@@ -93,12 +106,18 @@ async function listFolders(path: string): Promise<FolderListing> {
   };
 }
 
+// Starts run one at a time, in order. Quick clicks then end on the session that the user chose last.
+let starting = Promise.resolve();
+
 async function handle(socket: WebSocket, message: ClientMessage): Promise<void> {
   switch (message.type) {
     case "list_folders":
       return send(socket, { type: "folders", listing: await listFolders(message.path) });
-    case "start":
-      return start(message.cwd, message.file);
+    case "start": {
+      const run = starting.then(() => start(message.cwd, message.file));
+      starting = run.catch(() => {});
+      return run;
+    }
     case "remove_project":
       removeProject(message.path);
       return broadcastProjects();

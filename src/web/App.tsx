@@ -10,7 +10,7 @@ import {
 } from "react";
 import { applyEvent } from "../shared/chat-state.ts";
 import type { ClientMessage, FolderListing, Project, ServerMessage, SessionSnapshot } from "../shared/protocol.ts";
-import { Banner, MessageView, type ToolResults, Working } from "./Message.tsx";
+import { Banner, MessageView, Skeleton, type ToolResults, Working } from "./Message.tsx";
 
 /** Distance in pixels from the page bottom that still counts as "at the bottom". */
 const BOTTOM_SLACK = 80;
@@ -43,6 +43,7 @@ export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [session, setSession] = useState<SessionSnapshot | null>(null);
   const [picking, setPicking] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const [text, setText] = useState("");
   const [atBottom, setAtBottom] = useState(true);
@@ -58,6 +59,7 @@ export function App() {
       setConnected(false);
       setSession(null);
       setProjects([]);
+      setLoading(false);
     };
     socket.onmessage = (message) => {
       const data = JSON.parse(message.data) as ServerMessage;
@@ -65,7 +67,11 @@ export function App() {
         case "snapshot":
           setSession(data.session);
           setErrors([]);
+          setLoading(false);
           if (data.session) setPicking(false);
+          break;
+        case "starting":
+          setLoading(true);
           break;
         case "projects":
           setProjects(data.projects);
@@ -80,6 +86,7 @@ export function App() {
           break;
         case "error":
           setErrors((current) => [...current, data.message]);
+          setLoading(false);
           break;
       }
     };
@@ -153,7 +160,7 @@ export function App() {
     }
   }
 
-  const showChat = session && !picking;
+  const showChat = session && !picking && !loading;
   const messages = session?.state.messages ?? [];
   const streaming = session?.state.streaming ?? null;
   // One list, so a streamed message keeps its element when it completes.
@@ -224,6 +231,7 @@ export function App() {
 
       <div className="main">
         <header className="header">
+          {loading && <span className="skeleton skeleton-chip" />}
           {showChat && (
             <span className="chip" title={session.cwd}>
               <Folder size={14} />
@@ -247,7 +255,9 @@ export function App() {
           </div>
         )}
 
-        {showChat ? (
+        {loading ? (
+          <Skeleton />
+        ) : showChat ? (
           <>
             <main className="thread">
               <div className="column">
