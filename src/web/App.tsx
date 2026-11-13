@@ -3,6 +3,8 @@ import {
   ArrowLeft,
   ArrowUp,
   Bot,
+  ChevronDown,
+  ChevronRight,
   CornerLeftUp,
   Folder,
   FolderPlus,
@@ -40,8 +42,6 @@ import { SessionFooter } from "./SessionFooter.tsx";
 /** Distance in pixels from the page bottom that still counts as "at the bottom". */
 const BOTTOM_SLACK = 80;
 const COMPOSER_MAX_HEIGHT = 200;
-/** The session that this tab shows. A reload of the tab opens it again. */
-const VIEW_KEY = "pi-ui:session";
 /** The image types that Pi accepts in a prompt. */
 const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 /** The wait before the first reconnect. Each failed attempt doubles it, up to the maximum. */
@@ -81,10 +81,14 @@ function scrollToBottom(behavior: ScrollBehavior): void {
 export function App() {
   const socketRef = useRef<WebSocket | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  /** The session that this tab shows. A reconnect opens it again. A reload clears it and shows the welcome screen. */
+  const viewRef = useRef<{ cwd: string; file: string } | null>(null);
   const [connected, setConnected] = useState(false);
   const [cwd, setCwd] = useState("");
   const [listing, setListing] = useState<FolderListing | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
+  /** The paths of the projects that show their sessions. All projects start collapsed. */
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [statuses, setStatuses] = useState<Record<string, SessionStatus>>({});
   const [session, setSession] = useState<SessionSnapshot | null>(null);
   const [picking, setPicking] = useState(false);
@@ -108,11 +112,8 @@ export function App() {
         delay = RECONNECT_MIN_MS;
         setConnected(true);
         send({ type: "list_folders", path: "" });
-        const view = sessionStorage.getItem(VIEW_KEY);
-        if (view) {
-          const { cwd, file } = JSON.parse(view) as { cwd: string; file: string };
-          send({ type: "start", cwd, file });
-        }
+        const view = viewRef.current;
+        if (view) send({ type: "start", cwd: view.cwd, file: view.file });
       };
       socket.onclose = () => {
         setConnected(false);
@@ -130,12 +131,8 @@ export function App() {
             setSession(data.session);
             setErrors([]);
             setLoading(false);
-            if (data.session) {
-              setPicking(false);
-              sessionStorage.setItem(VIEW_KEY, JSON.stringify({ cwd: data.session.cwd, file: data.session.file }));
-            } else {
-              sessionStorage.removeItem(VIEW_KEY);
-            }
+            viewRef.current = data.session ? { cwd: data.session.cwd, file: data.session.file } : null;
+            if (data.session) setPicking(false);
             break;
           case "starting":
             setLoading(true);
@@ -221,6 +218,14 @@ export function App() {
     setCwd("");
     setPicking(true);
     send({ type: "list_folders", path: "" });
+  }
+
+  function toggleProject(path: string) {
+    setExpanded((current) => {
+      const next = new Set(current);
+      if (!next.delete(path)) next.add(path);
+      return next;
+    });
   }
 
   function browse(path: string) {
@@ -364,7 +369,10 @@ export function App() {
         {projects.map((project) => (
           <section key={project.path} className="project">
             <div className="project-row" title={project.path}>
-              <span className="project-name">{folderName(project.path)}</span>
+              <button className="project-toggle" onClick={() => toggleProject(project.path)}>
+                {expanded.has(project.path) ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                <span className="project-name">{folderName(project.path)}</span>
+              </button>
               <button className="row-action" onClick={() => start(project.path)} title="New session">
                 <SquarePen size={14} />
               </button>
@@ -378,43 +386,45 @@ export function App() {
                 </button>
               )}
             </div>
-            <ul className="sessions">
-              {project.sessions.map((item) => {
-                const active = item.file === session?.file;
-                const status = statuses[item.file];
-                return (
-                  <li key={item.file} className={active ? "session-row active" : "session-row"}>
-                    <button
-                      className="session-open"
-                      onClick={() => (active ? setPicking(false) : start(project.path, item.file))}
-                      title={item.title}
-                    >
-                      <span
-                        className={
-                          status === "running" ? "session-title shimmer" : status ? "session-title" : "session-title cold"
-                        }
+            {expanded.has(project.path) && (
+              <ul className="sessions">
+                {project.sessions.map((item) => {
+                  const active = item.file === session?.file;
+                  const status = statuses[item.file];
+                  return (
+                    <li key={item.file} className={active ? "session-row active" : "session-row"}>
+                      <button
+                        className="session-open"
+                        onClick={() => (active ? setPicking(false) : start(project.path, item.file))}
+                        title={item.title}
                       >
-                        {item.title}
+                        <span
+                          className={
+                            status === "running" ? "session-title shimmer" : status ? "session-title" : "session-title cold"
+                          }
+                        >
+                          {item.title}
+                        </span>
+                      </button>
+                      <span className="session-status">
+                        {status !== "running" && (
+                          <>
+                            <button
+                              className="row-action"
+                              onClick={() => send({ type: "remove_session", file: item.file })}
+                              title="Remove session"
+                            >
+                              <X size={14} />
+                            </button>
+                            {item.unread && <span className="unread-dot" />}
+                          </>
+                        )}
                       </span>
-                    </button>
-                    <span className="session-status">
-                      {status !== "running" && (
-                        <>
-                          <button
-                            className="row-action"
-                            onClick={() => send({ type: "remove_session", file: item.file })}
-                            title="Remove session"
-                          >
-                            <X size={14} />
-                          </button>
-                          {item.unread && <span className="unread-dot" />}
-                        </>
-                      )}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </section>
         ))}
       </aside>

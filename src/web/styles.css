@@ -158,6 +158,16 @@ textarea::placeholder {
   color: var(--text-3);
 }
 
+.project-toggle {
+  display: flex;
+  flex: 1;
+  align-self: stretch;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  text-align: left;
+}
+
 .project-name {
   flex: 1;
   min-width: 0;
