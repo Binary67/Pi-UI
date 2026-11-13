@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev:server": "node --watch src/server/main.ts",
+    "dev:server": "node src/server/main.ts",
     "dev:web": "vite",
     "typecheck": "tsc --noEmit"
   },
