@@ -215,7 +215,6 @@ textarea::placeholder {
 .session-open {
   display: flex;
   flex: 1;
-  gap: 4px;
   align-items: center;
   min-width: 0;
   padding: 7px 10px;
@@ -234,13 +233,9 @@ textarea::placeholder {
   font-weight: 500;
 }
 
-/* The warm marker has its own slot, so the titles of all rows start at the same place. */
-.session-warm {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: 16px;
-  color: var(--text-3);
+/* A cold session has no live process. Its title is dimmed, like a sleeping tab. */
+.session-title.cold {
+  color: var(--text-2);
 }
 
 /* One slot for the unread marker and the remove button. They share its cell. */

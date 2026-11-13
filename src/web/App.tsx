@@ -11,7 +11,6 @@ import {
   Puzzle,
   SquarePen,
   X,
-  Zap,
 } from "lucide-react";
 import {
   type ChangeEvent,
@@ -384,10 +383,11 @@ export function App() {
                       onClick={() => (active ? setPicking(false) : start(project.path, item.file))}
                       title={item.title}
                     >
-                      <span className="session-warm" title={status ? "Warm: opens instantly" : undefined}>
-                        {status && <Zap size={12} />}
-                      </span>
-                      <span className={status === "running" ? "session-title shimmer" : "session-title"}>
+                      <span
+                        className={
+                          status === "running" ? "session-title shimmer" : status ? "session-title" : "session-title cold"
+                        }
+                      >
                         {item.title}
                       </span>
                     </button>
