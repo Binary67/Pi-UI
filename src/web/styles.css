@@ -844,8 +844,7 @@ textarea::placeholder {
 }
 
 .working svg {
-  color: var(--accent);
-  animation: pulse 1.6s ease-in-out infinite;
+  color: var(--text-2);
 }
 
 .shimmer {
@@ -859,6 +858,10 @@ textarea::placeholder {
 
 .spin {
   animation: spin 1s linear infinite;
+}
+
+.pulse {
+  animation: pulse 1.6s ease-in-out infinite;
 }
 
 /* Loading skeleton */
@@ -1009,7 +1012,7 @@ textarea::placeholder {
 @keyframes pulse {
   50% {
     opacity: 0.5;
-    transform: scale(0.75) rotate(45deg);
+    transform: scale(0.75);
   }
 }
 

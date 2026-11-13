@@ -1,4 +1,6 @@
 import {
+  Brain,
+  BrainCircuit,
   Check,
   ChevronRight,
   CircleAlert,
@@ -11,7 +13,6 @@ import {
   type LucideIcon,
   Minus,
   Search,
-  Sparkle,
   Terminal,
   Wrench,
   X,
@@ -63,7 +64,7 @@ export function Banner({ children }: { children: ReactNode }) {
 export function Working() {
   return (
     <div className="working">
-      <Sparkle size={16} />
+      <BrainCircuit size={16} className="pulse" />
       <span className="shimmer">Working…</span>
     </div>
   );
@@ -138,6 +139,7 @@ function ThinkingBlock({ text, active }: { text: string; active: boolean }) {
     <div className="thinking">
       <button className="disclosure" onClick={() => setOpen(!open)} aria-expanded={open}>
         <ChevronRight size={14} className="chevron" />
+        <Brain size={14} className={active ? "pulse" : undefined} />
         <span className={active ? "shimmer" : undefined}>{active ? "Thinking…" : "Thought"}</span>
       </button>
       {open && <div className="thinking-text">{text.trim()}</div>}
