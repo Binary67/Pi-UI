@@ -960,6 +960,36 @@ textarea::placeholder {
   pointer-events: auto;
 }
 
+/* Messages that wait for delivery during a run, above the composer. */
+.queue {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 8px;
+  padding: 0 12px;
+  font-size: 13px;
+  color: var(--text-2);
+  list-style: none;
+}
+
+.queue li {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.queue-kind {
+  flex: none;
+  font-weight: 600;
+  color: var(--text-3);
+}
+
+.queue-text {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .composer {
   display: flex;
   flex-wrap: wrap;
@@ -1039,11 +1069,6 @@ textarea::placeholder {
 
 .send:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent) 88%, black);
-}
-
-.send.stop,
-.send.stop:hover {
-  background: var(--text);
 }
 
 .send:disabled {

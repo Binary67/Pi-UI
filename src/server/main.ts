@@ -263,11 +263,21 @@ async function handle(socket: WebSocket, message: ClientMessage): Promise<void> 
   if (!session) throw new Error("Start a session first.");
   switch (message.type) {
     case "prompt":
-      await session.pi.send({ type: "prompt", message: message.text, images: message.images });
+      await session.pi.send({
+        type: "prompt",
+        message: message.text,
+        images: message.images,
+        streamingBehavior: message.streamingBehavior,
+      });
       return;
-    case "abort":
+    case "abort": {
+      // As with Esc in the TUI, queued messages go back to the composer. Otherwise they run after the abort.
+      const { data } = await session.pi.send({ type: "clear_queue" });
+      const text = [...data.steering, ...data.followUp].join("\n\n");
+      if (text) send(socket, { type: "restore", text });
       await session.pi.send({ type: "abort" });
       return;
+    }
     case "set_model":
       await session.pi.send({ type: "set_model", provider: message.provider, modelId: message.modelId });
       return refresh(session);

@@ -13,9 +13,12 @@ export type ChatState = {
   streaming: AssistantMessage | null;
   /** True from agent_start until agent_settled. */
   running: boolean;
+  /** Messages that wait for delivery during a run. */
+  steering: readonly string[];
+  followUp: readonly string[];
 };
 
-export const emptyChatState: ChatState = { messages: [], streaming: null, running: false };
+export const emptyChatState: ChatState = { messages: [], streaming: null, running: false, steering: [], followUp: [] };
 
 export function applyEvent(state: ChatState, event: JsonAgentSessionEvent): ChatState {
   switch (event.type) {
@@ -23,6 +26,8 @@ export function applyEvent(state: ChatState, event: JsonAgentSessionEvent): Chat
       return { ...state, running: true };
     case "agent_settled":
       return { ...state, running: false };
+    case "queue_update":
+      return { ...state, steering: event.steering, followUp: event.followUp };
     case "message_start":
       return event.message.role === "assistant" ? { ...state, streaming: event.message } : state;
     case "message_update":

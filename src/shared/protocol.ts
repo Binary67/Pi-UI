@@ -9,6 +9,9 @@ import type { ChatState } from "./chat-state.ts";
 /** An image attached to a prompt, in the Pi wire format: base64 data and a MIME type. */
 export type PromptImage = NonNullable<Extract<RpcCommand, { type: "prompt" }>["images"]>[number];
 
+/** How Pi handles a prompt during a run. `steer` guides the next LLM call, `followUp` waits until the run ends. */
+export type StreamingBehavior = NonNullable<Extract<RpcCommand, { type: "prompt" }>["streamingBehavior"]>;
+
 export type ThinkingLevel = RpcSessionState["thinkingLevel"];
 
 /** The parts of a Pi model that the page shows. The full model can contain provider headers. */
@@ -30,7 +33,9 @@ export type SessionInfo = {
 export type ClientMessage =
   /** Show a new session in `cwd`, or the session in `file`. A session that is not live starts in a new Pi process. */
   | { type: "start"; cwd: string; file?: string }
-  | { type: "prompt"; file: string; text: string; images: PromptImage[] }
+  /** Pi uses `streamingBehavior` only during a run. In an idle session, the prompt starts a run. */
+  | { type: "prompt"; file: string; text: string; images: PromptImage[]; streamingBehavior: StreamingBehavior }
+  /** Clear the queue, then stop the run. The queued text comes back in a `restore` message. */
   | { type: "abort"; file: string }
   | { type: "set_model"; file: string; provider: string; modelId: string }
   | { type: "set_thinking_level"; file: string; level: ThinkingLevel }
@@ -64,4 +69,6 @@ export type ServerMessage =
   | { type: "event"; file: string; event: JsonAgentSessionEvent }
   /** New model, thinking level, or usage data for the session in `file`. */
   | { type: "info"; file: string; info: SessionInfo }
+  /** The text of the queued messages that an abort removed, for the composer. */
+  | { type: "restore"; text: string }
   | { type: "error"; message: string };

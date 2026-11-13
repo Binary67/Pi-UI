@@ -9,7 +9,6 @@ import {
   Globe,
   Pi,
   Puzzle,
-  Square,
   SquarePen,
   X,
   Zap,
@@ -34,6 +33,7 @@ import type {
   ServerMessage,
   SessionSnapshot,
   SessionStatus,
+  StreamingBehavior,
 } from "../shared/protocol.ts";
 import { Banner, MessageView, Skeleton, type ToolResults, WorkGroup, Working } from "./Message.tsx";
 import { SessionFooter } from "./SessionFooter.tsx";
@@ -160,6 +160,9 @@ export function App() {
           case "info":
             setSession((current) => (current?.file === data.file ? { ...current, info: data.info } : current));
             break;
+          case "restore":
+            setText((current) => [data.text, current].filter((part) => part.trim()).join("\n\n"));
+            break;
           case "error":
             setErrors((current) => [...current, data.message]);
             setLoading(false);
@@ -181,6 +184,17 @@ export function App() {
     window.addEventListener("scroll", onScroll);
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
+
+  // Esc stops the run, as in the TUI. A menu that closes on Esc handles the key first and prevents the default.
+  const runningFile = running ? session?.file : undefined;
+  useEffect(() => {
+    if (!runningFile) return;
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape" && !event.defaultPrevented) send({ type: "abort", file: runningFile });
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [runningFile]);
 
   // Follow new content only when the reader is already at the bottom.
   useEffect(() => {
@@ -235,9 +249,9 @@ export function App() {
     start(cwd);
   }
 
-  function submit() {
-    if (!session || running || (!text.trim() && !images.length)) return;
-    send({ type: "prompt", file: session.file, text, images });
+  function submit(streamingBehavior: StreamingBehavior) {
+    if (!session || (!text.trim() && !images.length)) return;
+    send({ type: "prompt", file: session.file, text, images, streamingBehavior });
     setText("");
     setImages([]);
   }
@@ -253,13 +267,19 @@ export function App() {
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      submit();
+      submit(event.altKey ? "followUp" : "steer");
     }
   }
 
   const showChat = session && !picking && !loading;
   const messages = session?.state.messages ?? [];
   const streaming = session?.state.streaming ?? null;
+  const queued = session
+    ? [
+        ...session.state.steering.map((text) => ({ kind: "Steering", text })),
+        ...session.state.followUp.map((text) => ({ kind: "Follow-up", text })),
+      ]
+    : [];
   // One list, so a streamed message keeps its element when it completes.
   const items = streaming ? [...messages, streaming] : messages;
   const results: ToolResults = new Map();
@@ -439,6 +459,16 @@ export function App() {
                     <ArrowDown size={18} />
                   </button>
                 )}
+                {queued.length > 0 && (
+                  <ul className="queue">
+                    {queued.map((item, index) => (
+                      <li key={index}>
+                        <span className="queue-kind">{item.kind}</span>
+                        <span className="queue-text">{item.text}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
                 <div className="composer">
                   {images.length > 0 && (
                     <div className="attachments">
@@ -466,15 +496,14 @@ export function App() {
                     rows={1}
                     autoFocus
                   />
-                  {running ? (
-                    <button className="send stop" onClick={() => send({ type: "abort", file: session.file })} title="Stop">
-                      <Square size={14} fill="currentColor" />
-                    </button>
-                  ) : (
-                    <button className="send" onClick={submit} disabled={!text.trim() && !images.length} title="Send">
-                      <ArrowUp size={18} />
-                    </button>
-                  )}
+                  <button
+                    className="send"
+                    onClick={() => submit("steer")}
+                    disabled={!text.trim() && !images.length}
+                    title="Send"
+                  >
+                    <ArrowUp size={18} />
+                  </button>
                 </div>
                 <SessionFooter
                   info={session.info}
