@@ -27,6 +27,9 @@ const opening = new Map<string, Promise<Session>>();
 const stopping = new Map<string, Promise<void>>();
 // The session file that each page shows.
 const views = new Map<WebSocket, string>();
+// A Pi process that waits for the next new session in `cwd`, so a new chat opens at once. The server keeps one spare,
+// for the project of the chat that a page opened last.
+let spare: { cwd: string; session: Promise<Session> } | undefined;
 const clients = new Set<WebSocket>();
 
 function send(socket: WebSocket, message: ServerMessage): void {
@@ -55,7 +58,7 @@ async function broadcastProjects(): Promise<void> {
   broadcast({ type: "projects", projects: await listProjects() });
 }
 
-/** Start a Pi process for the session in `file`, or for a new session in `cwd`. */
+/** Start a Pi process for the session in `file`, or for a new session in `cwd`. The session is not live yet. */
 async function launch(cwd: string, file?: string): Promise<Session> {
   // Two Pi processes must not write to the same file.
   if (file) await stopping.get(file);
@@ -76,7 +79,7 @@ async function launch(cwd: string, file?: string): Promise<Session> {
       if (event.type === "agent_settled") release(session.file);
     },
     (code) => {
-      // A session that the server stopped is not in the map anymore.
+      // A spare, or a session that the server stopped, is not in the map.
       if (!session || sessions.get(session.file) !== session) return;
       clearTimeout(session.timer);
       sessions.delete(session.file);
@@ -97,17 +100,39 @@ async function launch(cwd: string, file?: string): Promise<Session> {
     pi,
     state: { ...emptyChatState, messages: history.data.messages },
   };
+  return session;
+}
+
+/** Make `session` live. */
+function register(session: Session): Session {
   sessions.set(session.file, session);
   broadcast(statusMessage());
   return session;
 }
 
+/** Start a spare Pi process for `cwd`, unless one exists. A spare for another project stops. */
+function prepareSpare(cwd: string): void {
+  if (spare?.cwd === cwd) return;
+  // A spare has no session file yet, so its stop needs no entry in `stopping`.
+  void spare?.session.then((session) => session.pi.stop(), () => {});
+  const session = launch(cwd);
+  // A spare that fails to start reports the error to the chat that takes it.
+  session.catch(() => {});
+  spare = { cwd, session };
+}
+
 /** The live session in `file`, or a new Pi process for it. Without `file`, a new session in `cwd`. */
 async function open(cwd: string, file?: string): Promise<Session> {
-  if (!file) return launch(cwd);
+  if (!file) {
+    const ready = spare?.cwd === cwd ? spare.session : undefined;
+    if (ready) spare = undefined;
+    const session = await ready;
+    // A spare that has exited cannot run the session. Then a new process starts.
+    return register(session && !session.pi.exited ? session : await launch(cwd));
+  }
   const live = sessions.get(file) ?? opening.get(file);
   if (live) return live;
-  const opened = launch(cwd, file).finally(() => opening.delete(file));
+  const opened = launch(cwd, file).then(register).finally(() => opening.delete(file));
   opening.set(file, opened);
   return opened;
 }
@@ -149,6 +174,7 @@ async function start(socket: WebSocket, folder: string, file?: string): Promise<
   views.set(socket, session.file);
   send(socket, { type: "snapshot", session: { cwd: session.cwd, file: session.file, state: session.state } });
   if (previous) release(previous);
+  prepareSpare(cwd);
 }
 
 /** Subfolders of `path`, or of the home folder when `path` is empty. Hidden folders are left out. */

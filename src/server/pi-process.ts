@@ -65,6 +65,11 @@ export class PiProcess {
     return this.pending.size > 0;
   }
 
+  /** True after the process has exited. */
+  get exited(): boolean {
+    return this.child.exitCode !== null || this.child.signalCode !== null;
+  }
+
   /** Close stdin, so Pi finishes pending work and exits. Resolves when the process has exited. */
   stop(): Promise<void> {
     this.child.stdin.end();
