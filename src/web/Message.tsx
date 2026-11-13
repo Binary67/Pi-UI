@@ -235,7 +235,7 @@ export function MessageView({ message, results, running, streaming }: MessageVie
         return <ToolCard key={index} call={block} result={results.get(block.id)} running={running} />;
       })}
       {message.errorMessage && <Banner>{message.errorMessage}</Banner>}
-      {!streaming && text.trim() && (
+      {!streaming && message.stopReason !== "toolUse" && text.trim() && (
         <div className="message-actions">
           <CopyButton getText={() => text} label="Copy" />
         </div>
