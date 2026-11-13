@@ -92,7 +92,7 @@ textarea::placeholder {
   flex-direction: column;
   gap: 2px;
   width: 260px;
-  height: 100vh;
+  height: 100dvh;
   padding: 13px 10px 16px;
   overflow-y: auto;
   background: var(--surface);
@@ -413,6 +413,13 @@ textarea::placeholder {
 .icon-button:hover {
   color: var(--text);
   background: var(--surface);
+}
+
+/* The menu button opens the sidebar. It shows only on a narrow screen. */
+.menu-button {
+  display: none;
+  grid-column: 1;
+  justify-self: start;
 }
 
 .notice {
@@ -1210,6 +1217,7 @@ textarea::placeholder {
 }
 
 .send {
+  position: relative;
   display: grid;
   flex: none;
   place-items: center;
@@ -1219,6 +1227,11 @@ textarea::placeholder {
   background: var(--accent);
   border-radius: 50%;
   transition: background 0.15s;
+  /* A long press must not open the iOS callout, select text, or scroll the page. */
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: none;
 }
 
 .send:hover:not(:disabled) {
@@ -1228,6 +1241,47 @@ textarea::placeholder {
 .send:disabled {
   opacity: 1;
   background: rgb(29 29 31 / 0.15);
+}
+
+/* The ring around the send button. It fills during a hold that stops the run, and goes back on an early release. */
+.send-ring {
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  width: calc(100% + 8px);
+  height: calc(100% + 8px);
+  pointer-events: none;
+}
+
+.send-ring circle {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 6;
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+  transition: stroke-dashoffset 0.2s ease-out;
+}
+
+.send.holding .send-ring circle {
+  stroke-dashoffset: 0;
+  transition: stroke-dashoffset var(--hold) linear;
+}
+
+/* The hint after a tap on the stop icon. It has the style of the message action tooltips. */
+.send-hint {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--bg);
+  background: var(--text);
+  border-radius: 8px;
+  pointer-events: none;
+  animation: menu-in 0.14s ease-out;
 }
 
 /* Session footer: pickers and usage below the composer */
@@ -1495,12 +1549,124 @@ textarea::placeholder {
   transform: translateX(-50%);
 }
 
+/* Narrow screen: the sidebar is a drawer over the page, and the menu button in the header opens it. */
+
+@media (max-width: 768px) {
+  .sidebar {
+    position: fixed;
+    left: 0;
+    z-index: 30;
+    width: min(300px, 85vw);
+    overscroll-behavior: contain;
+    visibility: hidden;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease-out, visibility 0.25s;
+  }
+
+  .sidebar.open {
+    visibility: visible;
+    transform: none;
+  }
+
+  .backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    background: rgb(0 0 0 / 0.2);
+    touch-action: none;
+    animation: fade-in 0.25s ease-out;
+  }
+
+  /* A long folder name shrinks the chip and does not push the header buttons out. */
+  .header {
+    grid-template-columns: 1fr minmax(0, auto) 1fr;
+  }
+
+  .menu-button {
+    display: grid;
+  }
+
+  .column {
+    padding: 0 16px;
+  }
+
+  .welcome {
+    padding: 32px 16px 10vh;
+  }
+
+  .welcome h1 {
+    font-size: 32px;
+  }
+}
+
+/* Touch screen: there is no hover. The actions that show on hover always show, and the touch targets are larger. */
+
+@media (hover: none) {
+  .row-action,
+  .session-status {
+    width: 32px;
+    height: 32px;
+  }
+
+  .row-action {
+    opacity: 1;
+  }
+
+  /* An unread session shows its dot. Its remove button shows after the session opens. */
+  .session-status:has(.unread-dot) .row-action {
+    visibility: hidden;
+  }
+
+  .session-open {
+    padding: 10px;
+  }
+
+  .message-actions {
+    opacity: 1;
+  }
+
+  /* A tap would leave the tooltip on the screen. */
+  .action-button::after {
+    display: none;
+  }
+
+  /* A tap opens the token card. A tap outside closes it. */
+  .usage:focus .usage-card {
+    opacity: 1;
+    visibility: visible;
+    transform: none;
+  }
+
+  .pill,
+  .usage {
+    padding: 7px 10px;
+  }
+
+  .send {
+    width: 40px;
+    height: 40px;
+  }
+
+  /* iOS zooms in on a field with text smaller than 16px. */
+  .composer textarea,
+  .folder-card input,
+  .menu-search input {
+    font-size: 16px;
+  }
+}
+
 /* Motion */
 
 @keyframes rise {
   from {
     opacity: 0;
     transform: translateY(6px);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
   }
 }
 

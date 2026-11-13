@@ -1,13 +1,13 @@
 import {
   ArrowDown,
   ArrowLeft,
-  ArrowUp,
   Bot,
   ChevronDown,
   ChevronRight,
   CornerLeftUp,
   Folder,
   FolderPlus,
+  Menu,
   Pi,
   Puzzle,
   SquarePen,
@@ -37,6 +37,7 @@ import type {
 } from "../shared/protocol.ts";
 import { Banner, MessageView, Skeleton, type ToolResults, WorkGroup, Working } from "./Message.tsx";
 import { Remote } from "./Remote.tsx";
+import { SendButton } from "./SendButton.tsx";
 import { SessionFooter } from "./SessionFooter.tsx";
 
 /** Distance in pixels from the page bottom that still counts as "at the bottom". */
@@ -47,6 +48,8 @@ const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif
 /** The wait before the first reconnect. Each failed attempt doubles it, up to the maximum. */
 const RECONNECT_MIN_MS = 500;
 const RECONNECT_MAX_MS = 5000;
+/** True on a touch screen. Enter then adds a new line, and no field takes the focus by itself. */
+const TOUCH = matchMedia("(hover: none)").matches;
 
 function readImage(file: File): Promise<PromptImage> {
   return new Promise((resolve, reject) => {
@@ -90,6 +93,8 @@ export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   /** The paths of the projects that show their sessions. All projects start collapsed. */
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  /** True when the sidebar shows as a drawer over the page, on a narrow screen. */
+  const [drawer, setDrawer] = useState(false);
   const [statuses, setStatuses] = useState<Record<string, SessionStatus>>({});
   const [session, setSession] = useState<SessionSnapshot | null>(null);
   const [picking, setPicking] = useState(false);
@@ -216,12 +221,14 @@ export function App() {
 
   function start(path: string, file?: string) {
     setErrors([]);
+    setDrawer(false);
     send({ type: "start", cwd: path.trim(), file });
   }
 
   function addProject() {
     setCwd("");
     setPicking(true);
+    setDrawer(false);
     send({ type: "list_folders", path: "" });
   }
 
@@ -272,8 +279,9 @@ export function App() {
     void Promise.all(files.map(readImage)).then((added) => setImages((current) => [...current, ...added]));
   }
 
+  // On a touch screen, Enter adds a new line, and the send button sends.
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === "Enter" && !event.shiftKey) {
+    if (event.key === "Enter" && !event.shiftKey && !TOUCH) {
       event.preventDefault();
       submit(event.altKey ? "followUp" : "steer");
     }
@@ -343,7 +351,7 @@ export function App() {
 
   return (
     <div className="app">
-      <aside className="sidebar">
+      <aside className={drawer ? "sidebar open" : "sidebar"}>
         <div className="brand">
           <span className="brand-mark">
             <Pi size={16} />
@@ -396,7 +404,11 @@ export function App() {
                     <li key={item.file} className={active ? "session-row active" : "session-row"}>
                       <button
                         className="session-open"
-                        onClick={() => (active ? setPicking(false) : start(project.path, item.file))}
+                        onClick={() => {
+                          if (!active) return start(project.path, item.file);
+                          setPicking(false);
+                          setDrawer(false);
+                        }}
                         title={item.title}
                       >
                         <span
@@ -429,9 +441,13 @@ export function App() {
           </section>
         ))}
       </aside>
+      {drawer && <div className="backdrop" onClick={() => setDrawer(false)} />}
 
       <div className="main">
         <header className="header">
+          <button className="icon-button menu-button" onClick={() => setDrawer(true)} title="Open sidebar">
+            <Menu size={18} />
+          </button>
           {loading && <span className="skeleton skeleton-chip" />}
           {showChat && (
             <span className="chip" title={session.cwd}>
@@ -511,16 +527,14 @@ export function App() {
                     onPaste={onPaste}
                     placeholder="Message Pi…"
                     rows={1}
-                    autoFocus
+                    autoFocus={!TOUCH}
                   />
-                  <button
-                    className="send"
-                    onClick={() => submit("steer")}
-                    disabled={!text.trim() && !images.length}
-                    title="Send"
-                  >
-                    <ArrowUp size={18} />
-                  </button>
+                  <SendButton
+                    running={running}
+                    ready={Boolean(text.trim() || images.length)}
+                    onSend={() => submit("steer")}
+                    onStop={() => send({ type: "abort", file: session.file })}
+                  />
                 </div>
                 <SessionFooter
                   info={session.info}
@@ -545,7 +559,7 @@ export function App() {
                   onChange={onPathChange}
                   placeholder="D:\Projects\my-app"
                   disabled={!connected}
-                  autoFocus
+                  autoFocus={!TOUCH}
                 />
                 <button type="submit" className="primary" disabled={!connected || !cwd.trim()}>
                   Start
