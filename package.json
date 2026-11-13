@@ -8,7 +8,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "1.5.2",
     "@fontsource-variable/inter": "^5.3.0",
     "highlight.js": "^11.12.0",
     "lucide-react": "^1.72.0",

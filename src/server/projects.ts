@@ -1,8 +1,8 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
 import type { Project } from "../shared/protocol.ts";
+import { listSessions } from "./session-files.ts";
 
 const FILE = join(homedir(), ".pi-ui", "projects.json");
 
@@ -78,18 +78,16 @@ export function markRead(file: string): boolean {
   return true;
 }
 
-/** Projects with their kept sessions, newest session first. Pi supplies the session titles. */
+/** Projects with their kept sessions, newest session first. Titles come from Pi's session files. */
 export async function listProjects(): Promise<Project[]> {
   return Promise.all(
     projects.map(async ({ path, sessions, unread }) => ({
       path,
-      sessions: (await SessionManager.list(path))
-        .filter((info) => sessions.includes(info.path))
-        .map((info) => ({
-          file: info.path,
-          title: info.name ?? info.firstMessage,
-          unread: unread.includes(info.path),
-        })),
+      sessions: (await listSessions(sessions)).map((info) => ({
+        file: info.path,
+        title: info.title,
+        unread: unread.includes(info.path),
+      })),
     })),
   );
 }
