@@ -60,9 +60,15 @@ export class PiProcess {
     });
   }
 
-  /** Close stdin, so Pi finishes pending work and exits. */
-  stop(): void {
+  /** True while a command waits for its response. */
+  get busy(): boolean {
+    return this.pending.size > 0;
+  }
+
+  /** Close stdin, so Pi finishes pending work and exits. Resolves when the process has exited. */
+  stop(): Promise<void> {
     this.child.stdin.end();
+    return new Promise((resolve) => this.child.once("close", () => resolve()));
   }
 
   private handleRecord(record: PiRecord, onEvent: (event: JsonAgentSessionEvent) => void): void {

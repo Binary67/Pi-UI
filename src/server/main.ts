@@ -12,10 +12,21 @@ const PORT = 3001;
 // Only the Vite dev page may connect. Other websites open in the browser must not control Pi.
 const ALLOWED_ORIGINS = new Set(["http://localhost:5173", "http://127.0.0.1:5173"]);
 
-type Session = { cwd: string; file: string; pi: PiProcess; state: ChatState };
+// An idle session that no page shows stays warm this long, so it opens again at once. Then its Pi process stops.
+const WARM_MS = 10 * 60 * 1000;
 
-// The session belongs to the server, not to a page. It continues when pages reload or disconnect.
-let session: Session | undefined;
+type Session = { cwd: string; file: string; pi: PiProcess; state: ChatState; timer?: NodeJS.Timeout };
+
+// Sessions belong to the server, not to a page. Each live session has its own Pi process, so all of them can run at
+// the same time. A session stops after it was idle for WARM_MS with no page that shows it. Its file keeps it for a
+// later open.
+const sessions = new Map<string, Session>();
+// Opens in progress, by session file. A second open of the same file waits for the first one.
+const opening = new Map<string, Promise<Session>>();
+// Processes that stop now, by session file. A new open of the file waits until the old process has exited.
+const stopping = new Map<string, Promise<void>>();
+// The session file that each page shows.
+const views = new Map<WebSocket, string>();
 const clients = new Set<WebSocket>();
 
 function send(socket: WebSocket, message: ServerMessage): void {
@@ -26,10 +37,17 @@ function broadcast(message: ServerMessage): void {
   for (const client of clients) send(client, message);
 }
 
-function snapshot(): ServerMessage {
+/** Send `message` to the pages that show the session in `file`. */
+function sendToViewers(file: string, message: ServerMessage): void {
+  for (const [socket, viewed] of views) if (viewed === file) send(socket, message);
+}
+
+function statusMessage(): ServerMessage {
   return {
-    type: "snapshot",
-    session: session ? { cwd: session.cwd, file: session.file, state: session.state } : null,
+    type: "status",
+    sessions: Object.fromEntries(
+      [...sessions.values()].map((session) => [session.file, session.state.running ? "running" : "warm"] as const),
+    ),
   };
 }
 
@@ -37,58 +55,100 @@ async function broadcastProjects(): Promise<void> {
   broadcast({ type: "projects", projects: await listProjects() });
 }
 
-/** Start a new session in `folder`, or open the session in `file`. */
-async function start(folder: string, file?: string): Promise<void> {
-  const cwd = resolve(folder);
-  const info = await stat(cwd).catch(() => undefined);
-  if (!info?.isDirectory()) throw new Error(`Folder not found: ${folder}`);
-  addProject(cwd);
-  await broadcastProjects();
-
-  // A running Pi switches sessions in place, as /new and /resume do. Pi takes the folder of an opened session from
-  // its file. It starts a new session only in its own folder, so a new session in another folder needs a new process.
-  const reuse = session && (file || session.cwd === cwd) ? session.pi : undefined;
-  if (!reuse) broadcast({ type: "starting" });
-  const pi: PiProcess =
-    reuse ??
-    new PiProcess(
-      cwd,
-      file ? ["--session", file] : [],
-      (event) => {
-        if (session?.pi !== pi) return;
-        session.state = applyEvent(session.state, event);
-        broadcast({ type: "event", event });
-        // Pi saves the session file when the first user message ends. From then on, the sidebar can list it.
-        if (event.type === "message_end" && event.message.role === "user") {
-          keepSession(session.cwd, session.file);
-          void broadcastProjects();
-        }
-      },
-      (code) => {
-        if (session?.pi !== pi) return;
-        session = undefined;
-        broadcast(snapshot());
-        broadcast({ type: "error", message: `Pi exited with code ${code}` });
-      },
-    );
-  if (reuse) {
-    const { data } = file
-      ? await pi.send({ type: "switch_session", sessionPath: file })
-      : await pi.send({ type: "new_session" });
-    // An extension can cancel the switch. Then the current session stays.
-    if (data.cancelled) return;
-  }
+/** Start a Pi process for the session in `file`, or for a new session in `cwd`. */
+async function launch(cwd: string, file?: string): Promise<Session> {
+  // Two Pi processes must not write to the same file.
+  if (file) await stopping.get(file);
+  let session: Session | undefined;
+  const pi = new PiProcess(
+    cwd,
+    file ? ["--session", file] : [],
+    (event) => {
+      if (!session) return;
+      session.state = applyEvent(session.state, event);
+      sendToViewers(session.file, { type: "event", file: session.file, event });
+      // Pi saves the session file when the first user message ends. From then on, the sidebar can list it.
+      if (event.type === "message_end" && event.message.role === "user") {
+        keepSession(session.cwd, session.file);
+        void broadcastProjects();
+      }
+      if (event.type === "agent_start" || event.type === "agent_settled") broadcast(statusMessage());
+      if (event.type === "agent_settled") release(session.file);
+    },
+    (code) => {
+      // A session that the server stopped is not in the map anymore.
+      if (!session || sessions.get(session.file) !== session) return;
+      clearTimeout(session.timer);
+      sessions.delete(session.file);
+      broadcast(statusMessage());
+      for (const [socket, viewed] of views) {
+        if (viewed !== session.file) continue;
+        views.delete(socket);
+        send(socket, { type: "snapshot", session: null });
+        send(socket, { type: "error", message: `Pi exited with code ${code}` });
+      }
+    },
+  );
   const state = await pi.send({ type: "get_state" });
   const history = await pi.send({ type: "get_messages" });
-  // Stop the previous process only now, so it keeps working until the new one is ready.
-  if (session?.pi !== pi) session?.pi.stop();
   session = {
     cwd,
     file: state.data.sessionFile!,
     pi,
     state: { ...emptyChatState, messages: history.data.messages },
   };
-  broadcast(snapshot());
+  sessions.set(session.file, session);
+  broadcast(statusMessage());
+  return session;
+}
+
+/** The live session in `file`, or a new Pi process for it. Without `file`, a new session in `cwd`. */
+async function open(cwd: string, file?: string): Promise<Session> {
+  if (!file) return launch(cwd);
+  const live = sessions.get(file) ?? opening.get(file);
+  if (live) return live;
+  const opened = launch(cwd, file).finally(() => opening.delete(file));
+  opening.set(file, opened);
+  return opened;
+}
+
+/** True while a run is in progress or a page shows the session. */
+function inUse(session: Session): boolean {
+  return session.state.running || [...views.values()].includes(session.file);
+}
+
+/** Start the WARM_MS count of `file` again. When it ends, the Pi process stops if the session is still idle. */
+function release(file: string): void {
+  const session = sessions.get(file);
+  if (!session) return;
+  clearTimeout(session.timer);
+  if (inUse(session)) return;
+  session.timer = setTimeout(() => {
+    // A prompt that waits for its response has not started its run yet. Then the session stays warm longer.
+    if (inUse(session) || session.pi.busy) return release(file);
+    sessions.delete(file);
+    stopping.set(file, session.pi.stop().finally(() => stopping.delete(file)));
+    broadcast(statusMessage());
+  }, WARM_MS);
+}
+
+/** Show a new session in `folder`, or the session in `file`, on the page of `socket`. */
+async function start(socket: WebSocket, folder: string, file?: string): Promise<void> {
+  const cwd = resolve(folder);
+  const info = await stat(cwd).catch(() => undefined);
+  if (!info?.isDirectory()) throw new Error(`Folder not found: ${folder}`);
+  addProject(cwd);
+  await broadcastProjects();
+
+  if (!file || !sessions.has(file)) send(socket, { type: "starting" });
+  const session = await open(cwd, file);
+  // The page closed while the session opened.
+  if (!clients.has(socket)) return release(session.file);
+  // Set the view and send the snapshot in the same tick, so no event falls between them.
+  const previous = views.get(socket);
+  views.set(socket, session.file);
+  send(socket, { type: "snapshot", session: { cwd: session.cwd, file: session.file, state: session.state } });
+  if (previous) release(previous);
 }
 
 /** Subfolders of `path`, or of the home folder when `path` is empty. Hidden folders are left out. */
@@ -106,16 +166,16 @@ async function listFolders(path: string): Promise<FolderListing> {
   };
 }
 
-// Starts run one at a time, in order. Quick clicks then end on the session that the user chose last.
-let starting = Promise.resolve();
+// The starts of a page run one at a time, in order. Quick clicks then end on the session that the user chose last.
+const starting = new Map<WebSocket, Promise<void>>();
 
 async function handle(socket: WebSocket, message: ClientMessage): Promise<void> {
   switch (message.type) {
     case "list_folders":
       return send(socket, { type: "folders", listing: await listFolders(message.path) });
     case "start": {
-      const run = starting.then(() => start(message.cwd, message.file));
-      starting = run.catch(() => {});
+      const run = (starting.get(socket) ?? Promise.resolve()).then(() => start(socket, message.cwd, message.file));
+      starting.set(socket, run.catch(() => {}));
       return run;
     }
     case "remove_project":
@@ -125,6 +185,7 @@ async function handle(socket: WebSocket, message: ClientMessage): Promise<void> 
       removeSession(message.file);
       return broadcastProjects();
   }
+  const session = sessions.get(message.file);
   if (!session) throw new Error("Start a session first.");
   if (message.type === "prompt") await session.pi.send({ type: "prompt", message: message.text });
   else await session.pi.send({ type: "abort" });
@@ -140,9 +201,8 @@ const server = new WebSocketServer({
 server.on("listening", () => console.log(`Pi UI server on ws://${HOST}:${PORT}/ws`));
 
 server.on("connection", (socket) => {
-  // Send the snapshot in the same tick as the join, so no event falls between them.
   clients.add(socket);
-  send(socket, snapshot());
+  send(socket, statusMessage());
   void listProjects().then((projects) => send(socket, { type: "projects", projects }));
 
   socket.on("message", (data) => {
@@ -151,5 +211,11 @@ server.on("connection", (socket) => {
     );
   });
 
-  socket.on("close", () => clients.delete(socket));
+  socket.on("close", () => {
+    clients.delete(socket);
+    starting.delete(socket);
+    const file = views.get(socket);
+    views.delete(socket);
+    if (file) release(file);
+  });
 });

@@ -7,6 +7,7 @@
   --border: rgb(29 29 31 / 0.1);
   --accent: #0066cc;
   --danger: #d70015;
+  --warm: #ff9500;
   --shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 8px 28px rgb(0 0 0 / 0.08);
   --font: -apple-system, BlinkMacSystemFont, "Inter Variable", "Segoe UI", system-ui, sans-serif;
   --mono: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
@@ -224,6 +225,35 @@ textarea::placeholder {
 
 .session-row.active .session-open {
   font-weight: 500;
+}
+
+/* One slot for the status marker and the remove button. They share its cell. */
+.session-status {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  color: var(--accent);
+}
+
+.session-status > * {
+  grid-area: 1 / 1;
+}
+
+.warm-dot {
+  width: 8px;
+  height: 8px;
+  background: var(--warm);
+  border-radius: 50%;
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+
+/* When the remove button shows, it takes the place of the dot. */
+.session-row:hover .row-action + .warm-dot,
+.row-action:focus-visible + .warm-dot {
+  opacity: 0;
 }
 
 /* Header */
