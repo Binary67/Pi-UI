@@ -1,6 +1,5 @@
 import {
   Brain,
-  BrainCircuit,
   Check,
   ChevronRight,
   CircleAlert,
@@ -64,7 +63,7 @@ export function Banner({ children }: { children: ReactNode }) {
 export function Working() {
   return (
     <div className="working">
-      <BrainCircuit size={16} className="pulse" />
+      <LoaderCircle size={16} className="spin" />
       <span className="shimmer">Working…</span>
     </div>
   );
