@@ -891,7 +891,7 @@ textarea::placeholder {
 
 .shimmer {
   color: transparent;
-  background: linear-gradient(90deg, var(--text-3) 40%, var(--text) 50%, var(--text-3) 60%);
+  background: linear-gradient(90deg, var(--text-3) 40%, var(--accent) 50%, var(--text-3) 60%);
   background-size: 300% 100%;
   -webkit-background-clip: text;
   background-clip: text;
