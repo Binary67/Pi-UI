@@ -231,7 +231,7 @@ function Usage({ stats }: { stats: SessionInfo["stats"] }) {
         </span>
       )}
       {stats.cost > 0 && (
-        <span>
+        <span className="usage-cost">
           {context && "· "}
           {formatCost(stats.cost)}
         </span>

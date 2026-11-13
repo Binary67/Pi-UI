@@ -1303,6 +1303,11 @@ textarea::placeholder {
   min-width: 0;
 }
 
+/* The thinking menu keeps its width. Only the model name gets shorter. */
+.menu + .menu {
+  flex: none;
+}
+
 .pill {
   display: inline-flex;
   align-items: center;
@@ -1441,11 +1446,13 @@ textarea::placeholder {
   color: var(--text-3);
 }
 
+/* Usage keeps its width, so its text does not wrap. */
 .usage {
   position: relative;
   display: inline-flex;
+  flex: none;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   margin-left: auto;
   padding: 4px 8px;
   color: var(--text-3);
@@ -1596,6 +1603,11 @@ textarea::placeholder {
 
   .welcome h1 {
     font-size: 32px;
+  }
+
+  /* The cost shows in the usage card, so the model name has more space. */
+  .usage-cost {
+    display: none;
   }
 }
 
