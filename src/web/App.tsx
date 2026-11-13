@@ -1,4 +1,18 @@
-import { ArrowDown, ArrowLeft, ArrowUp, CornerLeftUp, Folder, FolderPlus, Pi, Square, SquarePen, X } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowLeft,
+  ArrowUp,
+  Bot,
+  CornerLeftUp,
+  Folder,
+  FolderPlus,
+  Globe,
+  Pi,
+  Puzzle,
+  Square,
+  SquarePen,
+  X,
+} from "lucide-react";
 import {
   type ChangeEvent,
   type FormEvent,
@@ -179,10 +193,27 @@ export function App() {
           </span>
           Pi
         </div>
-        <button className="sidebar-button" onClick={addProject}>
-          <FolderPlus size={16} />
-          Add project
+        <button className="nav-item" disabled>
+          <Globe size={16} />
+          Remote
+          <span className="soon">Soon</span>
         </button>
+        <button className="nav-item" disabled>
+          <Puzzle size={16} />
+          Plugins
+          <span className="soon">Soon</span>
+        </button>
+        <button className="nav-item" disabled>
+          <Bot size={16} />
+          Bots
+          <span className="soon">Soon</span>
+        </button>
+        <div className="sidebar-heading">
+          <span className="project-name">Projects</span>
+          <button className="row-action" onClick={addProject} title="Add project">
+            <FolderPlus size={14} />
+          </button>
+        </div>
         {projects.map((project) => (
           <section key={project.path} className="project">
             <div className="project-row" title={project.path}>
