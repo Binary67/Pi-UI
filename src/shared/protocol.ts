@@ -60,6 +60,8 @@ export type FolderListing = { path: string; parent: string; folders: { name: str
 
 /** Messages from the server to the browser. */
 export type ServerMessage =
+  /** The tailnet URL that opens this UI on other devices. Null when remote access is off. */
+  | { type: "remote"; url: string | null }
   /** The session that this page shows now. */
   | { type: "snapshot"; session: SessionSnapshot | null }
   /** A new Pi process starts. The next snapshot or error ends the wait. */

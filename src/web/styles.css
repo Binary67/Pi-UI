@@ -119,6 +119,64 @@ textarea::placeholder {
   opacity: 1;
 }
 
+.remote {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.remote .nav-item:not(:disabled):hover,
+.remote .nav-item[aria-expanded="true"] {
+  color: var(--text);
+  background: rgb(29 29 31 / 0.06);
+}
+
+/* Below the Remote item, inside the sidebar width, so the sidebar scroll area does not clip it. */
+.remote-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  left: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 14px;
+  font-size: 13px;
+  color: var(--text-2);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  transform-origin: top left;
+  animation: menu-in 0.14s ease-out;
+}
+
+.remote-panel:focus-visible {
+  outline: none;
+}
+
+.remote-panel p {
+  margin: 0;
+  text-align: center;
+}
+
+.remote-url {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+}
+
+.remote-url span {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
 .soon {
   margin-left: auto;
   padding: 1px 6px;

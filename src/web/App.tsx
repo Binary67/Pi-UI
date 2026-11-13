@@ -8,7 +8,6 @@ import {
   CornerLeftUp,
   Folder,
   FolderPlus,
-  Globe,
   Pi,
   Puzzle,
   SquarePen,
@@ -37,6 +36,7 @@ import type {
   StreamingBehavior,
 } from "../shared/protocol.ts";
 import { Banner, MessageView, Skeleton, type ToolResults, WorkGroup, Working } from "./Message.tsx";
+import { Remote } from "./Remote.tsx";
 import { SessionFooter } from "./SessionFooter.tsx";
 
 /** Distance in pixels from the page bottom that still counts as "at the bottom". */
@@ -84,6 +84,7 @@ export function App() {
   /** The session that this tab shows. A reconnect opens it again. A reload clears it and shows the welcome screen. */
   const viewRef = useRef<{ cwd: string; file: string } | null>(null);
   const [connected, setConnected] = useState(false);
+  const [remoteUrl, setRemoteUrl] = useState<string | null>(null);
   const [cwd, setCwd] = useState("");
   const [listing, setListing] = useState<FolderListing | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -128,6 +129,9 @@ export function App() {
       socket.onmessage = (message) => {
         const data = JSON.parse(message.data) as ServerMessage;
         switch (data.type) {
+          case "remote":
+            setRemoteUrl(data.url);
+            break;
           case "snapshot":
             setSession(data.session);
             setErrors([]);
@@ -346,11 +350,7 @@ export function App() {
           </span>
           Pi
         </div>
-        <button className="nav-item" disabled>
-          <Globe size={16} />
-          Remote
-          <span className="soon">Soon</span>
-        </button>
+        <Remote url={remoteUrl} />
         <button className="nav-item" disabled>
           <Puzzle size={16} />
           Plugins

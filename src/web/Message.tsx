@@ -96,7 +96,7 @@ export function Skeleton() {
   );
 }
 
-function CopyButton({ getText, label }: { getText: () => string; label?: string }) {
+export function CopyButton({ getText, label }: { getText: () => string; label?: string }) {
   const [copied, setCopied] = useState(false);
 
   async function copy() {

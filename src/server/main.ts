@@ -328,6 +328,7 @@ server.on("listening", () => console.log(`Pi UI server on ws://${HOST}:${PORT}/w
 
 server.on("connection", (socket) => {
   clients.add(socket);
+  send(socket, { type: "remote", url: REMOTE_URL });
   send(socket, statusMessage());
   void listProjects().then((projects) => send(socket, { type: "projects", projects }));
 
