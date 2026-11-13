@@ -28,7 +28,7 @@ body,
 
 body {
   font-family: var(--font);
-  font-size: 16px;
+  font-size: 15px;
   color: var(--text);
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
@@ -637,7 +637,7 @@ textarea::placeholder {
 /* Markdown */
 
 .markdown {
-  line-height: 1.65;
+  line-height: 1.6;
   overflow-wrap: break-word;
 }
 
@@ -669,19 +669,19 @@ textarea::placeholder {
 }
 
 .markdown h1 {
-  font-size: 22px;
+  font-size: 20px;
 }
 
 .markdown h2 {
-  font-size: 19px;
+  font-size: 18px;
 }
 
 .markdown h3 {
-  font-size: 17px;
+  font-size: 16px;
 }
 
 .markdown h4 {
-  font-size: 16px;
+  font-size: 15px;
 }
 
 .markdown ul,
@@ -770,7 +770,7 @@ textarea::placeholder {
   padding: 10px 16px 16px;
   overflow-x: auto;
   font-family: var(--mono);
-  font-size: 13.5px;
+  font-size: 13px;
   line-height: 1.55;
 }
 
