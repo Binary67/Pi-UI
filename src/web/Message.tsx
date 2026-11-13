@@ -146,6 +146,28 @@ function ThinkingBlock({ text, active }: { text: string; active: boolean }) {
   );
 }
 
+function formatDuration(ms: number): string {
+  const seconds = Math.round(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  return minutes ? `${minutes}m ${seconds % 60}s` : `${seconds}s`;
+}
+
+/** The steps of a done turn, collapsed into one row above the final answer. */
+export function WorkGroup({ duration, tools, children }: { duration: number; tools: number; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div>
+      <button className="disclosure" onClick={() => setOpen(!open)} aria-expanded={open}>
+        <ChevronRight size={14} className="chevron" />
+        <span>
+          Worked for {formatDuration(duration)} · {tools} {tools === 1 ? "tool" : "tools"}
+        </span>
+      </button>
+      {open && <div className="work-steps">{children}</div>}
+    </div>
+  );
+}
+
 function summarize(args: Record<string, unknown>): string {
   const value =
     SUMMARY_KEYS.map((key) => args[key]).find((item) => typeof item === "string") ??

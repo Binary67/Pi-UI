@@ -19,12 +19,13 @@ import {
   type ClipboardEvent,
   type FormEvent,
   type KeyboardEvent,
+  type ReactNode,
   useEffect,
   useLayoutEffect,
   useRef,
   useState,
 } from "react";
-import { applyEvent } from "../shared/chat-state.ts";
+import { type AgentMessage, applyEvent } from "../shared/chat-state.ts";
 import type {
   ClientMessage,
   FolderListing,
@@ -34,7 +35,7 @@ import type {
   SessionSnapshot,
   SessionStatus,
 } from "../shared/protocol.ts";
-import { Banner, MessageView, Skeleton, type ToolResults, Working } from "./Message.tsx";
+import { Banner, MessageView, Skeleton, type ToolResults, WorkGroup, Working } from "./Message.tsx";
 
 /** Distance in pixels from the page bottom that still counts as "at the bottom". */
 const BOTTOM_SLACK = 80;
@@ -252,6 +253,45 @@ export function App() {
   for (const message of messages) {
     if (message.role === "toolResult") results.set(message.toolCallId, message);
   }
+  const view = (message: AgentMessage, index: number) => (
+    <MessageView key={index} message={message} results={results} running={running} streaming={message === streaming} />
+  );
+  // Each user message starts a turn. A done turn shows its steps in one collapsed group, then the final answer.
+  // The keys stay the item indexes, so the final answer keeps its element when the turn collapses.
+  const thread: ReactNode[] = [];
+  for (let start = 0, end = 0; start < items.length; start = end) {
+    end = start + 1;
+    while (end < items.length && items[end].role !== "user") end++;
+    const turn = items.slice(start, end);
+    const first = turn[0].role === "user" ? 1 : 0;
+    const last = turn.findLastIndex((message) => message.role === "assistant");
+    const final = turn[last];
+    if (
+      !(running && end === items.length) &&
+      last > first &&
+      final.role === "assistant" &&
+      final.stopReason === "stop" &&
+      final.content.some((block) => block.type === "text" && block.text.trim())
+    ) {
+      const steps = turn.slice(first, last);
+      const tools = steps.flatMap((message) =>
+        message.role === "assistant" ? message.content.filter((block) => block.type === "toolCall") : [],
+      ).length;
+      thread.push(
+        ...turn.slice(0, first).map((message, index) => view(message, start + index)),
+        <WorkGroup
+          key={`work-${start}`}
+          duration={final.timestamp + (final.durationMs ?? 0) - turn[0].timestamp}
+          tools={tools}
+        >
+          {steps.map((message, index) => view(message, start + first + index))}
+        </WorkGroup>,
+        ...turn.slice(last).map((message, index) => view(message, start + last + index)),
+      );
+    } else {
+      thread.push(...turn.map((message, index) => view(message, start + index)));
+    }
+  }
 
   return (
     <div className="app">
@@ -374,15 +414,7 @@ export function App() {
           <>
             <main className="thread">
               <div className="column">
-                {items.map((message, index) => (
-                  <MessageView
-                    key={index}
-                    message={message}
-                    results={results}
-                    running={running}
-                    streaming={message === streaming}
-                  />
-                ))}
+                {thread}
                 {running && !streaming?.content.length && <Working />}
                 {errors.map((error, index) => (
                   <Banner key={index}>{error}</Banner>
