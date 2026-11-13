@@ -1,6 +1,7 @@
 import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { type WebSocket, WebSocketServer } from "ws";
 import { applyEvent, type ChatState, emptyChatState } from "../shared/chat-state.ts";
 import type { ClientMessage, FolderListing, ModelRef, ServerMessage, SessionInfo } from "../shared/protocol.ts";
@@ -250,6 +251,37 @@ async function listFolders(path: string): Promise<FolderListing> {
   };
 }
 
+/**
+ * Write a new session with the entries of `file` before its user message with `timestamp`, as the TUI `/fork` does.
+ * Returns the new file, or undefined when no user message comes before. Then the fork is a new empty session, as in Pi.
+ */
+function fork(file: string, timestamp: number): string | undefined {
+  // Pi skips a line that the live process writes now. The fork needs only older entries.
+  const manager = SessionManager.open(file);
+  const target = manager
+    .getEntries()
+    .find((entry) => entry.type === "message" && entry.message.role === "user" && entry.message.timestamp === timestamp);
+  if (!target) throw new Error("The message is not in the session file.");
+  const kept = target.parentId ? manager.getBranch(target.parentId) : [];
+  const prompts = kept.flatMap((entry) =>
+    entry.type === "message" && entry.message.role === "user" ? [entry.message.content] : [],
+  );
+  if (!target.parentId || !prompts.length) return undefined;
+  // The sidebar title of a session is its name, else its first user text. See SessionManager.list.
+  const title =
+    manager.getSessionName() ??
+    prompts
+      .map((content) =>
+        typeof content === "string"
+          ? content
+          : content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join(" "),
+      )
+      .find(Boolean);
+  const forked = manager.createBranchedSession(target.parentId)!;
+  manager.appendSessionInfo(title ? `Fork: ${title}` : "Fork");
+  return forked;
+}
+
 // The starts of a page run one at a time, in order. Quick clicks then end on the session that the user chose last.
 const starting = new Map<WebSocket, Promise<void>>();
 
@@ -301,6 +333,12 @@ async function handle(socket: WebSocket, message: ClientMessage): Promise<void> 
     case "set_thinking_level":
       await session.pi.send({ type: "set_thinking_level", level: message.level });
       return refresh(session);
+    case "fork": {
+      const file = fork(session.file, message.timestamp);
+      if (file) keepSession(session.cwd, file);
+      // The fork opens in its own Pi process, after the other starts of the page. The original session does not change.
+      return handle(socket, { type: "start", cwd: session.cwd, file });
+    }
   }
 }
 

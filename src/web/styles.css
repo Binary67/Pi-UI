@@ -499,7 +499,6 @@ textarea::placeholder {
   gap: 8px;
   align-self: flex-end;
   max-width: 80%;
-  margin-bottom: 8px;
 }
 
 .user:not(:first-child) {
@@ -540,13 +539,72 @@ textarea::placeholder {
 .message-actions {
   display: flex;
   gap: 4px;
-  margin: -4px 0 0 -8px;
+  /* The first icon lines up with the text: a 32px button has 7px around an 18px icon. */
+  margin: -4px 0 0 -7px;
   opacity: 0;
   transition: opacity 0.15s;
 }
 
 .assistant:hover .message-actions,
+.user:hover .message-actions,
 .message-actions:focus-within {
+  opacity: 1;
+}
+
+/* Icons below the bubble, as in ChatGPT and Claude. The row also gives the space before the reply. */
+.user .message-actions {
+  margin: -4px 0 -8px;
+}
+
+/* An icon-only button in a message action row. Its `aria-label` shows as a dark tooltip above it. */
+.action-button {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  color: var(--text-2);
+  border-radius: 8px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.action-button:hover:not(:disabled) {
+  color: var(--text);
+  background: rgb(29 29 31 / 0.06);
+}
+
+/* The global disabled opacity would also fade the tooltip. A lighter icon shows the state instead. */
+.action-button:disabled {
+  color: var(--text-3);
+  opacity: 1;
+}
+
+/* The tooltip aligns to the outer edge of its row, so it stays in the column. */
+.action-button::after {
+  content: attr(aria-label);
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--bg);
+  background: var(--text);
+  border-radius: 8px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+
+.assistant .action-button::after {
+  right: auto;
+  left: 0;
+}
+
+.action-button:hover::after,
+.action-button:focus-visible::after {
   opacity: 1;
 }
 

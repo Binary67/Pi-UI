@@ -246,6 +246,14 @@ export function App() {
     setImages([]);
   }
 
+  // As with the TUI `/fork`, the text and images of the message replace the composer content.
+  function fork(timestamp: number, forkText: string, forkImages: PromptImage[]) {
+    if (!session) return;
+    send({ type: "fork", file: session.file, timestamp });
+    setText(forkText);
+    setImages(forkImages);
+  }
+
   // Pasted images become attachments. A paste without images inserts its text as usual.
   function onPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
     const files = [...event.clipboardData.files].filter((file) => IMAGE_TYPES.has(file.type));
@@ -277,7 +285,14 @@ export function App() {
     if (message.role === "toolResult") results.set(message.toolCallId, message);
   }
   const view = (message: AgentMessage, index: number) => (
-    <MessageView key={index} message={message} results={results} running={running} streaming={message === streaming} />
+    <MessageView
+      key={index}
+      message={message}
+      results={results}
+      running={running}
+      streaming={message === streaming}
+      onFork={(forkText, forkImages) => fork(message.timestamp, forkText, forkImages)}
+    />
   );
   // Each user message starts a turn. A done turn shows its steps in one collapsed group, then the final answer.
   // The keys stay the item indexes, so the final answer keeps its element when the turn collapses.

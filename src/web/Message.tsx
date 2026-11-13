@@ -7,11 +7,14 @@ import {
   FilePen,
   FileText,
   FolderOpen,
+  GitFork,
   Globe,
   LoaderCircle,
   type LucideIcon,
   Minus,
+  Pencil,
   Search,
+  Share,
   Terminal,
   Wrench,
   X,
@@ -21,6 +24,7 @@ import Markdown, { type Components } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 import type { AgentMessage, AssistantMessage } from "../shared/chat-state.ts";
+import type { PromptImage } from "../shared/protocol.ts";
 
 type ToolCall = Extract<AssistantMessage["content"][number], { type: "toolCall" }>;
 type ToolResult = Extract<AgentMessage, { role: "toolResult" }>;
@@ -211,6 +215,23 @@ function ToolCard({ call, result, running }: { call: ToolCall; result?: ToolResu
   );
 }
 
+/** The copy button of a message action row. The CSS shows the `aria-label` of an action button as its tooltip. */
+function CopyAction({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    await navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  return (
+    <button className="action-button" onClick={copy} aria-label={copied ? "Copied" : "Copy"}>
+      {copied ? <Check size={18} /> : <Copy size={18} />}
+    </button>
+  );
+}
+
 type MessageViewProps = {
   message: AgentMessage;
   results: ToolResults;
@@ -218,9 +239,11 @@ type MessageViewProps = {
   running: boolean;
   /** True when this message is still streaming. */
   streaming: boolean;
+  /** Fork the session before this user message. Gets the text and images of the message. */
+  onFork: (text: string, images: PromptImage[]) => void;
 };
 
-export function MessageView({ message, results, running, streaming }: MessageViewProps) {
+export function MessageView({ message, results, running, streaming, onFork }: MessageViewProps) {
   if (message.role === "user") {
     const text =
       typeof message.content === "string"
@@ -240,6 +263,18 @@ export function MessageView({ message, results, running, streaming }: MessageVie
           </div>
         )}
         {text && <div className="user-text">{text}</div>}
+        <div className="message-actions">
+          {text && <CopyAction text={text} />}
+          <button className="action-button" onClick={() => onFork(text, images)} aria-label="Fork from here">
+            <GitFork size={18} />
+          </button>
+          <button className="action-button" aria-label="Share · Soon" disabled>
+            <Share size={18} />
+          </button>
+          <button className="action-button" aria-label="Edit message · Soon" disabled>
+            <Pencil size={18} />
+          </button>
+        </div>
       </div>
     );
   }
@@ -259,7 +294,7 @@ export function MessageView({ message, results, running, streaming }: MessageVie
       {message.errorMessage && <Banner>{message.errorMessage}</Banner>}
       {!streaming && message.stopReason !== "toolUse" && text.trim() && (
         <div className="message-actions">
-          <CopyButton getText={() => text} label="Copy" />
+          <CopyAction text={text} />
         </div>
       )}
     </div>

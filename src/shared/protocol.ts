@@ -39,6 +39,8 @@ export type ClientMessage =
   | { type: "abort"; file: string }
   | { type: "set_model"; file: string; provider: string; modelId: string }
   | { type: "set_thinking_level"; file: string; level: ThinkingLevel }
+  /** Copy the session in `file` up to its user message with `timestamp` into a new session, then show it. */
+  | { type: "fork"; file: string; timestamp: number }
   | { type: "remove_project"; path: string }
   | { type: "remove_session"; file: string }
   /** List the subfolders of `path`, or of the home folder when `path` is empty. */
