@@ -480,10 +480,22 @@ textarea::placeholder {
   animation: rise 0.25s ease-out both;
 }
 
+/* A user message: image thumbnails, then the text bubble below them. */
 .user {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
   align-self: flex-end;
   max-width: 80%;
   margin-bottom: 8px;
+}
+
+.user:not(:first-child) {
+  margin-top: 20px;
+}
+
+.user-text {
   padding: 10px 16px;
   line-height: 1.5;
   white-space: pre-wrap;
@@ -492,8 +504,20 @@ textarea::placeholder {
   border-radius: 20px;
 }
 
-.user:not(:first-child) {
-  margin-top: 20px;
+.user-images {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.user-images img {
+  display: block;
+  width: 80px;
+  height: 80px;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  border-radius: 12px;
 }
 
 .assistant {
@@ -915,6 +939,7 @@ textarea::placeholder {
 
 .composer {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   gap: 8px;
   padding: 10px 10px 10px 18px;
@@ -927,6 +952,41 @@ textarea::placeholder {
 
 .composer:focus-within {
   border-color: rgb(0 102 204 / 0.35);
+}
+
+/* Pasted images, on their own line above the textarea. */
+.attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+  padding-top: 6px;
+}
+
+.attachment {
+  position: relative;
+}
+
+.attachment img {
+  display: block;
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.attachment-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  color: #ffffff;
+  background: var(--text);
+  border-radius: 50%;
 }
 
 .composer textarea {

@@ -204,7 +204,22 @@ export function MessageView({ message, results, running, streaming }: MessageVie
       typeof message.content === "string"
         ? message.content
         : message.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("");
-    return <div className="message user">{text}</div>;
+    const images =
+      typeof message.content === "string"
+        ? []
+        : message.content.flatMap((block) => (block.type === "image" ? [block] : []));
+    return (
+      <div className="message user">
+        {images.length > 0 && (
+          <div className="user-images">
+            {images.map((image, index) => (
+              <img key={index} src={`data:${image.mimeType};base64,${image.data}`} alt="" />
+            ))}
+          </div>
+        )}
+        {text && <div className="user-text">{text}</div>}
+      </div>
+    );
   }
   if (message.role !== "assistant") return null;
 

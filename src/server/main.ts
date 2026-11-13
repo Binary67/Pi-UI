@@ -187,7 +187,7 @@ async function handle(socket: WebSocket, message: ClientMessage): Promise<void> 
   }
   const session = sessions.get(message.file);
   if (!session) throw new Error("Start a session first.");
-  if (message.type === "prompt") await session.pi.send({ type: "prompt", message: message.text });
+  if (message.type === "prompt") await session.pi.send({ type: "prompt", message: message.text, images: message.images });
   else await session.pi.send({ type: "abort" });
 }
 

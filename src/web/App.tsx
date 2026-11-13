@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import {
   type ChangeEvent,
+  type ClipboardEvent,
   type FormEvent,
   type KeyboardEvent,
   useEffect,
@@ -28,6 +29,7 @@ import type {
   ClientMessage,
   FolderListing,
   Project,
+  PromptImage,
   ServerMessage,
   SessionSnapshot,
   SessionStatus,
@@ -39,6 +41,20 @@ const BOTTOM_SLACK = 80;
 const COMPOSER_MAX_HEIGHT = 200;
 /** The session that this tab shows. A reload of the tab opens it again. */
 const VIEW_KEY = "pi-ui:session";
+/** The image types that Pi accepts in a prompt. */
+const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+
+function readImage(file: File): Promise<PromptImage> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const url = reader.result as string;
+      resolve({ type: "image", data: url.slice(url.indexOf(",") + 1), mimeType: file.type });
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
 
 function greeting(): string {
   const hour = new Date().getHours();
@@ -71,6 +87,7 @@ export function App() {
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const [text, setText] = useState("");
+  const [images, setImages] = useState<PromptImage[]>([]);
   const [atBottom, setAtBottom] = useState(true);
   const running = session?.state.running ?? false;
 
@@ -189,9 +206,18 @@ export function App() {
   }
 
   function submit() {
-    if (!session || running || !text.trim()) return;
-    send({ type: "prompt", file: session.file, text });
+    if (!session || running || (!text.trim() && !images.length)) return;
+    send({ type: "prompt", file: session.file, text, images });
     setText("");
+    setImages([]);
+  }
+
+  // Pasted images become attachments. A paste without images inserts its text as usual.
+  function onPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const files = [...event.clipboardData.files].filter((file) => IMAGE_TYPES.has(file.type));
+    if (!files.length) return;
+    event.preventDefault();
+    void Promise.all(files.map(readImage)).then((added) => setImages((current) => [...current, ...added]));
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -355,11 +381,28 @@ export function App() {
                   </button>
                 )}
                 <div className="composer">
+                  {images.length > 0 && (
+                    <div className="attachments">
+                      {images.map((image, index) => (
+                        <div key={index} className="attachment">
+                          <img src={`data:${image.mimeType};base64,${image.data}`} alt="" />
+                          <button
+                            className="attachment-remove"
+                            onClick={() => setImages((current) => current.filter((_, i) => i !== index))}
+                            title="Remove image"
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <textarea
                     ref={textareaRef}
                     value={text}
                     onChange={(event) => setText(event.target.value)}
                     onKeyDown={onKeyDown}
+                    onPaste={onPaste}
                     placeholder="Message Pi…"
                     rows={1}
                     autoFocus
@@ -369,7 +412,7 @@ export function App() {
                       <Square size={14} fill="currentColor" />
                     </button>
                   ) : (
-                    <button className="send" onClick={submit} disabled={!text.trim()} title="Send">
+                    <button className="send" onClick={submit} disabled={!text.trim() && !images.length} title="Send">
                       <ArrowUp size={18} />
                     </button>
                   )}

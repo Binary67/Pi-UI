@@ -1,11 +1,14 @@
-import type { JsonAgentSessionEvent } from "@earendil-works/pi-coding-agent";
+import type { JsonAgentSessionEvent, RpcCommand } from "@earendil-works/pi-coding-agent";
 import type { ChatState } from "./chat-state.ts";
+
+/** An image attached to a prompt, in the Pi wire format: base64 data and a MIME type. */
+export type PromptImage = NonNullable<Extract<RpcCommand, { type: "prompt" }>["images"]>[number];
 
 /** Messages from the browser to the server. */
 export type ClientMessage =
   /** Show a new session in `cwd`, or the session in `file`. A session that is not live starts in a new Pi process. */
   | { type: "start"; cwd: string; file?: string }
-  | { type: "prompt"; file: string; text: string }
+  | { type: "prompt"; file: string; text: string; images: PromptImage[] }
   | { type: "abort"; file: string }
   | { type: "remove_project"; path: string }
   | { type: "remove_session"; file: string }
