@@ -13,6 +13,7 @@ const RPC_ENTRY = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-a
 const DIALOG_METHODS = new Set(["select", "confirm", "input", "editor"]);
 
 type PiRecord = JsonAgentSessionEvent | RpcExtensionUIRequest | RpcResponse;
+type RpcSuccess<T extends RpcCommand> = Extract<RpcResponse, { command: T["type"]; success: true }>;
 
 /** One `pi --mode rpc` child process, controlled through JSONL on stdin and stdout. */
 export class PiProcess {
@@ -21,8 +22,13 @@ export class PiProcess {
   private nextId = 0;
   private buffer = "";
 
-  constructor(cwd: string, onEvent: (event: JsonAgentSessionEvent) => void, onExit: (code: number | null) => void) {
-    this.child = spawn(process.execPath, [RPC_ENTRY], { cwd, stdio: ["pipe", "pipe", "inherit"] });
+  constructor(
+    cwd: string,
+    args: string[],
+    onEvent: (event: JsonAgentSessionEvent) => void,
+    onExit: (code: number | null) => void,
+  ) {
+    this.child = spawn(process.execPath, [RPC_ENTRY, ...args], { cwd, stdio: ["pipe", "pipe", "inherit"] });
 
     // Split only on LF: JSON strings can contain U+2028 and U+2029, so readline is not safe here.
     this.child.stdout.setEncoding("utf8");
@@ -43,11 +49,13 @@ export class PiProcess {
     });
   }
 
-  /** Send a command and wait for its response. */
-  send(command: RpcCommand): Promise<RpcResponse> {
+  /** Send a command and wait for its response. Rejects when Pi reports a failure. */
+  send<T extends RpcCommand>(command: T): Promise<RpcSuccess<T>> {
     const id = String(this.nextId++);
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      const settle = (response: RpcResponse) =>
+        response.success ? resolve(response as RpcSuccess<T>) : reject(new Error(response.error));
+      this.pending.set(id, { resolve: settle, reject });
       this.write({ ...command, id });
     });
   }

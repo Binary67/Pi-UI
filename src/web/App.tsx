@@ -1,11 +1,17 @@
-import { ArrowDown, ArrowLeft, ArrowUp, Folder, Pi, Square, SquarePen } from "lucide-react";
-import { type FormEvent, type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ArrowDown, ArrowLeft, ArrowUp, CornerLeftUp, Folder, FolderPlus, Pi, Square, SquarePen, X } from "lucide-react";
+import {
+  type ChangeEvent,
+  type FormEvent,
+  type KeyboardEvent,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { applyEvent } from "../shared/chat-state.ts";
-import type { ClientMessage, ServerMessage, SessionSnapshot } from "../shared/protocol.ts";
+import type { ClientMessage, FolderListing, Project, ServerMessage, SessionSnapshot } from "../shared/protocol.ts";
 import { Banner, MessageView, type ToolResults, Working } from "./Message.tsx";
 
-const RECENT_KEY = "pi-ui.recent-folders";
-const RECENT_LIMIT = 5;
 /** Distance in pixels from the page bottom that still counts as "at the bottom". */
 const BOTTOM_SLACK = 80;
 const COMPOSER_MAX_HEIGHT = 200;
@@ -33,7 +39,8 @@ export function App() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [connected, setConnected] = useState(false);
   const [cwd, setCwd] = useState("");
-  const [recent, setRecent] = useState<string[]>(() => JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]"));
+  const [listing, setListing] = useState<FolderListing | null>(null);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [session, setSession] = useState<SessionSnapshot | null>(null);
   const [picking, setPicking] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
@@ -43,10 +50,14 @@ export function App() {
 
   useEffect(() => {
     const socket = new WebSocket(`ws://${location.host}/ws`);
-    socket.onopen = () => setConnected(true);
+    socket.onopen = () => {
+      setConnected(true);
+      send({ type: "list_folders", path: "" });
+    };
     socket.onclose = () => {
       setConnected(false);
       setSession(null);
+      setProjects([]);
     };
     socket.onmessage = (message) => {
       const data = JSON.parse(message.data) as ServerMessage;
@@ -54,16 +65,15 @@ export function App() {
         case "snapshot":
           setSession(data.session);
           setErrors([]);
-          if (data.session) {
-            const path = data.session.cwd;
-            setCwd(path);
-            setPicking(false);
-            setRecent((current) => {
-              const next = [path, ...current.filter((item) => item !== path)].slice(0, RECENT_LIMIT);
-              localStorage.setItem(RECENT_KEY, JSON.stringify(next));
-              return next;
-            });
-          }
+          if (data.session) setPicking(false);
+          break;
+        case "projects":
+          setProjects(data.projects);
+          break;
+        case "folders":
+          setListing(data.listing);
+          // An empty input asked for the home folder. Show its path there.
+          setCwd((current) => current || data.listing.path);
           break;
         case "event":
           setSession((current) => current && { ...current, state: applyEvent(current.state, data.event) });
@@ -103,9 +113,26 @@ export function App() {
     socketRef.current?.send(JSON.stringify(message));
   }
 
-  function start(path: string) {
+  function start(path: string, file?: string) {
     setErrors([]);
-    send({ type: "start", cwd: path.trim() });
+    send({ type: "start", cwd: path.trim(), file });
+  }
+
+  function addProject() {
+    setCwd("");
+    setPicking(true);
+    send({ type: "list_folders", path: "" });
+  }
+
+  function browse(path: string) {
+    setCwd(path);
+    send({ type: "list_folders", path });
+  }
+
+  function onPathChange(event: ChangeEvent<HTMLInputElement>) {
+    const path = event.target.value;
+    setCwd(path);
+    if (path.trim()) send({ type: "list_folders", path });
   }
 
   function onStart(event: FormEvent) {
@@ -138,132 +165,189 @@ export function App() {
 
   return (
     <div className="app">
-      <header className="header">
+      <aside className="sidebar">
         <div className="brand">
           <span className="brand-mark">
             <Pi size={16} />
           </span>
           Pi
         </div>
-        {showChat && (
-          <span className="chip" title={session.cwd}>
-            <Folder size={14} />
-            <span>{folderName(session.cwd)}</span>
-          </span>
-        )}
-        <div className="header-actions">
+        <button className="sidebar-button" onClick={addProject}>
+          <FolderPlus size={16} />
+          Add project
+        </button>
+        {projects.map((project) => (
+          <section key={project.path} className="project">
+            <div className="project-row" title={project.path}>
+              <span className="project-name">{folderName(project.path)}</span>
+              <button className="row-action" onClick={() => start(project.path)} title="New session">
+                <SquarePen size={14} />
+              </button>
+              {project.path !== session?.cwd && (
+                <button
+                  className="row-action"
+                  onClick={() => send({ type: "remove_project", path: project.path })}
+                  title="Remove project"
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+            <ul className="sessions">
+              {project.sessions.map((item) => {
+                const active = item.file === session?.file;
+                return (
+                  <li key={item.file} className={active ? "session-row active" : "session-row"}>
+                    <button
+                      className="session-open"
+                      onClick={() => (active ? setPicking(false) : start(project.path, item.file))}
+                      title={item.title}
+                    >
+                      {item.title}
+                    </button>
+                    {!active && (
+                      <button
+                        className="row-action"
+                        onClick={() => send({ type: "remove_session", file: item.file })}
+                        title="Remove session"
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        ))}
+      </aside>
+
+      <div className="main">
+        <header className="header">
           {showChat && (
-            <button className="icon-button" onClick={() => setPicking(true)} title="New session">
-              <SquarePen size={18} />
-            </button>
+            <span className="chip" title={session.cwd}>
+              <Folder size={14} />
+              <span>{folderName(session.cwd)}</span>
+            </span>
           )}
-        </div>
-      </header>
+          <div className="header-actions">
+            {showChat && (
+              <button className="icon-button" onClick={() => start(session.cwd)} title="New session">
+                <SquarePen size={18} />
+              </button>
+            )}
+          </div>
+        </header>
 
-      {!connected && (
-        <div className="column notice">
-          <Banner>
-            Not connected. Run <code>npm run dev:server</code>, then reload this page.
-          </Banner>
-        </div>
-      )}
+        {!connected && (
+          <div className="column notice">
+            <Banner>
+              Not connected. Run <code>npm run dev:server</code>, then reload this page.
+            </Banner>
+          </div>
+        )}
 
-      {showChat ? (
-        <>
-          <main className="thread">
-            <div className="column">
-              {items.map((message, index) => (
-                <MessageView
-                  key={index}
-                  message={message}
-                  results={results}
-                  running={running}
-                  streaming={message === streaming}
+        {showChat ? (
+          <>
+            <main className="thread">
+              <div className="column">
+                {items.map((message, index) => (
+                  <MessageView
+                    key={index}
+                    message={message}
+                    results={results}
+                    running={running}
+                    streaming={message === streaming}
+                  />
+                ))}
+                {running && !streaming?.content.length && <Working />}
+                {errors.map((error, index) => (
+                  <Banner key={index}>{error}</Banner>
+                ))}
+              </div>
+            </main>
+            <div className="dock">
+              <div className="column">
+                {!atBottom && (
+                  <button className="scroll-down" onClick={() => scrollToBottom("smooth")} title="Scroll to bottom">
+                    <ArrowDown size={18} />
+                  </button>
+                )}
+                <div className="composer">
+                  <textarea
+                    ref={textareaRef}
+                    value={text}
+                    onChange={(event) => setText(event.target.value)}
+                    onKeyDown={onKeyDown}
+                    placeholder="Message Pi…"
+                    rows={1}
+                    autoFocus
+                  />
+                  {running ? (
+                    <button className="send stop" onClick={() => send({ type: "abort" })} title="Stop">
+                      <Square size={14} fill="currentColor" />
+                    </button>
+                  ) : (
+                    <button className="send" onClick={submit} disabled={!text.trim()} title="Send">
+                      <ArrowUp size={18} />
+                    </button>
+                  )}
+                </div>
+                <p className="hint">Enter to send · Shift+Enter for new line</p>
+              </div>
+            </div>
+          </>
+        ) : (
+          <main className="welcome">
+            <div className="welcome-inner">
+              <h1>{greeting()}</h1>
+              <p className="welcome-sub">Choose a project folder to start a session.</p>
+              <form className="folder-card" onSubmit={onStart}>
+                <Folder size={18} />
+                <input
+                  value={cwd}
+                  onChange={onPathChange}
+                  placeholder="D:\Projects\my-app"
+                  disabled={!connected}
+                  autoFocus
                 />
-              ))}
-              {running && !streaming?.content.length && <Working />}
+                <button type="submit" className="primary" disabled={!connected || !cwd.trim()}>
+                  Start
+                </button>
+              </form>
               {errors.map((error, index) => (
                 <Banner key={index}>{error}</Banner>
               ))}
-            </div>
-          </main>
-          <div className="dock">
-            <div className="column">
-              {!atBottom && (
-                <button className="scroll-down" onClick={() => scrollToBottom("smooth")} title="Scroll to bottom">
-                  <ArrowDown size={18} />
-                </button>
-              )}
-              <div className="composer">
-                <textarea
-                  ref={textareaRef}
-                  value={text}
-                  onChange={(event) => setText(event.target.value)}
-                  onKeyDown={onKeyDown}
-                  placeholder="Message Pi…"
-                  rows={1}
-                  autoFocus
-                />
-                {running ? (
-                  <button className="send stop" onClick={() => send({ type: "abort" })} title="Stop">
-                    <Square size={14} fill="currentColor" />
-                  </button>
-                ) : (
-                  <button className="send" onClick={submit} disabled={!text.trim()} title="Send">
-                    <ArrowUp size={18} />
-                  </button>
-                )}
-              </div>
-              <p className="hint">Enter to send · Shift+Enter for new line</p>
-            </div>
-          </div>
-        </>
-      ) : (
-        <main className="welcome">
-          <div className="welcome-inner">
-            <h1>{greeting()}</h1>
-            <p className="welcome-sub">Choose a project folder to start a session.</p>
-            <form className="folder-card" onSubmit={onStart}>
-              <Folder size={18} />
-              <input
-                value={cwd}
-                onChange={(event) => setCwd(event.target.value)}
-                placeholder="D:\Projects\my-app"
-                disabled={!connected}
-                autoFocus
-              />
-              <button type="submit" className="primary" disabled={!connected || !cwd.trim()}>
-                Start
-              </button>
-            </form>
-            {errors.map((error, index) => (
-              <Banner key={index}>{error}</Banner>
-            ))}
-            {recent.length > 0 && (
-              <section className="recent">
-                <h2>Recent</h2>
-                <ul>
-                  {recent.map((path) => (
-                    <li key={path}>
-                      <button onClick={() => start(path)} disabled={!connected} title={path}>
+              {connected && listing && (
+                <ul className="folders">
+                  {listing.parent !== listing.path && (
+                    <li>
+                      <button onClick={() => browse(listing.parent)} title={listing.parent}>
+                        <CornerLeftUp size={16} />
+                        <span>..</span>
+                      </button>
+                    </li>
+                  )}
+                  {listing.folders.map((folder) => (
+                    <li key={folder.path}>
+                      <button onClick={() => browse(folder.path)} title={folder.path}>
                         <Folder size={16} />
-                        <span className="recent-name">{folderName(path)}</span>
-                        <span className="recent-path">{path}</span>
+                        <span>{folder.name}</span>
                       </button>
                     </li>
                   ))}
                 </ul>
-              </section>
-            )}
-            {session && (
-              <button className="link" onClick={() => setPicking(false)}>
-                <ArrowLeft size={14} />
-                Back to session
-              </button>
-            )}
-          </div>
-        </main>
-      )}
+              )}
+              {session && (
+                <button className="link" onClick={() => setPicking(false)}>
+                  <ArrowLeft size={14} />
+                  Back to session
+                </button>
+              )}
+            </div>
+          </main>
+        )}
+      </div>
     </div>
   );
 }
