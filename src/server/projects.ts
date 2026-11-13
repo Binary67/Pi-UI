@@ -48,6 +48,11 @@ export function keepSession(path: string, file: string): void {
   save();
 }
 
+/** True when the UI keeps the session in `file`. */
+export function isKept(file: string): boolean {
+  return projects.some((project) => project.sessions.includes(file));
+}
+
 export function removeSession(file: string): void {
   projects = projects.map((project) => ({
     ...project,

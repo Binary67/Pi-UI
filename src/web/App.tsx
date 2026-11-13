@@ -217,15 +217,6 @@ export function App() {
     send({ type: "start", cwd: path.trim(), file });
   }
 
-  function removeSession(project: Project, file: string) {
-    send({ type: "remove_session", file });
-    if (file !== session?.file) return;
-    // The open session goes away. Show the next one, or the one above it, or a new session.
-    const index = project.sessions.findIndex((item) => item.file === file);
-    const next = project.sessions[index + 1] ?? project.sessions[index - 1];
-    start(project.path, next?.file);
-  }
-
   function addProject() {
     setCwd("");
     setPicking(true);
@@ -396,7 +387,7 @@ export function App() {
                         <>
                           <button
                             className="row-action"
-                            onClick={() => removeSession(project, item.file)}
+                            onClick={() => send({ type: "remove_session", file: item.file })}
                             title="Remove session"
                           >
                             <X size={14} />

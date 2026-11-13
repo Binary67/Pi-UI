@@ -7,6 +7,7 @@ import type { ClientMessage, FolderListing, ModelRef, ServerMessage, SessionInfo
 import { PiProcess } from "./pi-process.ts";
 import {
   addProject,
+  isKept,
   keepSession,
   listProjects,
   markRead,
@@ -209,18 +210,27 @@ async function start(socket: WebSocket, folder: string, file?: string): Promise<
   addProject(cwd);
   await broadcastProjects();
 
+  // A session that the sidebar lists can be removed while it opens.
+  const listed = file !== undefined && isKept(file);
   if (!file || !sessions.has(file)) send(socket, { type: "starting" });
   const session = await open(cwd, file);
   // The page closed while the session opened.
   if (!clients.has(socket)) return release(session.file);
-  // Set the view and send the snapshot in the same tick, so no event falls between them.
   const previous = views.get(socket);
-  views.set(socket, session.file);
-  send(socket, {
-    type: "snapshot",
-    session: { cwd: session.cwd, file: session.file, state: session.state, info: session.info },
-  });
-  if (markRead(session.file)) void broadcastProjects();
+  if (listed && !isKept(session.file)) {
+    // The session was removed while it opened. The page goes back to the start screen.
+    views.delete(socket);
+    send(socket, { type: "snapshot", session: null });
+    release(session.file);
+  } else {
+    // Set the view and send the snapshot in the same tick, so no event falls between them.
+    views.set(socket, session.file);
+    send(socket, {
+      type: "snapshot",
+      session: { cwd: session.cwd, file: session.file, state: session.state, info: session.info },
+    });
+    if (markRead(session.file)) void broadcastProjects();
+  }
   if (previous) release(previous);
   prepareSpare(cwd);
 }
@@ -257,6 +267,13 @@ async function handle(socket: WebSocket, message: ClientMessage): Promise<void> 
       return broadcastProjects();
     case "remove_session":
       removeSession(message.file);
+      // The pages that show the session go back to the start screen.
+      for (const [viewer, viewed] of views) {
+        if (viewed !== message.file) continue;
+        views.delete(viewer);
+        send(viewer, { type: "snapshot", session: null });
+      }
+      release(message.file);
       return broadcastProjects();
   }
   const session = sessions.get(message.file);
