@@ -43,6 +43,9 @@ const COMPOSER_MAX_HEIGHT = 200;
 const VIEW_KEY = "pi-ui:session";
 /** The image types that Pi accepts in a prompt. */
 const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+/** The wait before the first reconnect. Each failed attempt doubles it, up to the maximum. */
+const RECONNECT_MIN_MS = 500;
+const RECONNECT_MAX_MS = 5000;
 
 function readImage(file: File): Promise<PromptImage> {
   return new Promise((resolve, reject) => {
@@ -92,64 +95,77 @@ export function App() {
   const running = session?.state.running ?? false;
 
   useEffect(() => {
-    const socket = new WebSocket(`ws://${location.host}/ws`);
-    socket.onopen = () => {
-      setConnected(true);
-      send({ type: "list_folders", path: "" });
-      const view = sessionStorage.getItem(VIEW_KEY);
-      if (view) {
-        const { cwd, file } = JSON.parse(view) as { cwd: string; file: string };
-        send({ type: "start", cwd, file });
-      }
-    };
-    socket.onclose = () => {
-      setConnected(false);
-      setSession(null);
-      setProjects([]);
-      setStatuses({});
-      setLoading(false);
-    };
-    socket.onmessage = (message) => {
-      const data = JSON.parse(message.data) as ServerMessage;
-      switch (data.type) {
-        case "snapshot":
-          setSession(data.session);
-          setErrors([]);
-          setLoading(false);
-          if (data.session) {
-            setPicking(false);
-            sessionStorage.setItem(VIEW_KEY, JSON.stringify({ cwd: data.session.cwd, file: data.session.file }));
-          } else {
-            sessionStorage.removeItem(VIEW_KEY);
-          }
-          break;
-        case "starting":
-          setLoading(true);
-          break;
-        case "projects":
-          setProjects(data.projects);
-          break;
-        case "status":
-          setStatuses(data.sessions);
-          break;
-        case "folders":
-          setListing(data.listing);
-          // An empty input asked for the home folder. Show its path there.
-          setCwd((current) => current || data.listing.path);
-          break;
-        case "event":
-          setSession((current) =>
-            current?.file === data.file ? { ...current, state: applyEvent(current.state, data.event) } : current,
-          );
-          break;
-        case "error":
-          setErrors((current) => [...current, data.message]);
-          setLoading(false);
-          break;
-      }
-    };
-    socketRef.current = socket;
+    let socket: WebSocket;
+    let delay = RECONNECT_MIN_MS;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    function connect() {
+      socket = new WebSocket(`ws://${location.host}/ws`);
+      socket.onopen = () => {
+        // Only an open socket sends. Clicks while the socket connects go to the closed one and are dropped.
+        socketRef.current = socket;
+        delay = RECONNECT_MIN_MS;
+        setConnected(true);
+        send({ type: "list_folders", path: "" });
+        const view = sessionStorage.getItem(VIEW_KEY);
+        if (view) {
+          const { cwd, file } = JSON.parse(view) as { cwd: string; file: string };
+          send({ type: "start", cwd, file });
+        }
+      };
+      socket.onclose = () => {
+        setConnected(false);
+        setSession(null);
+        setProjects([]);
+        setStatuses({});
+        setLoading(false);
+        timer = setTimeout(connect, delay);
+        delay = Math.min(delay * 2, RECONNECT_MAX_MS);
+      };
+      socket.onmessage = (message) => {
+        const data = JSON.parse(message.data) as ServerMessage;
+        switch (data.type) {
+          case "snapshot":
+            setSession(data.session);
+            setErrors([]);
+            setLoading(false);
+            if (data.session) {
+              setPicking(false);
+              sessionStorage.setItem(VIEW_KEY, JSON.stringify({ cwd: data.session.cwd, file: data.session.file }));
+            } else {
+              sessionStorage.removeItem(VIEW_KEY);
+            }
+            break;
+          case "starting":
+            setLoading(true);
+            break;
+          case "projects":
+            setProjects(data.projects);
+            break;
+          case "status":
+            setStatuses(data.sessions);
+            break;
+          case "folders":
+            setListing(data.listing);
+            // An empty input asked for the home folder. Show its path there.
+            setCwd((current) => current || data.listing.path);
+            break;
+          case "event":
+            setSession((current) =>
+              current?.file === data.file ? { ...current, state: applyEvent(current.state, data.event) } : current,
+            );
+            break;
+          case "error":
+            setErrors((current) => [...current, data.message]);
+            setLoading(false);
+            break;
+        }
+      };
+    }
+
+    connect();
     return () => {
+      clearTimeout(timer);
       socket.onclose = null;
       socket.close();
     };
@@ -347,7 +363,7 @@ export function App() {
         {!connected && (
           <div className="column notice">
             <Banner>
-              Not connected. Run <code>npm run dev:server</code>, then reload this page.
+              Not connected. Reconnecting… If the server is not running, run <code>npm run dev:server</code>.
             </Banner>
           </div>
         )}
