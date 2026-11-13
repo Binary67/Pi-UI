@@ -7,7 +7,6 @@ import {
   Folder,
   FolderPlus,
   Globe,
-  LoaderCircle,
   Pi,
   Puzzle,
   Square,
@@ -360,19 +359,14 @@ export function App() {
                 return (
                   <li key={item.file} className={active ? "session-row active" : "session-row"}>
                     <button
-                      className="session-open"
+                      className={status === "running" ? "session-open shimmer" : "session-open"}
                       onClick={() => (active ? setPicking(false) : start(project.path, item.file))}
                       title={item.title}
                     >
                       {item.title}
                     </button>
-                    <span
-                      className="session-status"
-                      title={status === "running" ? "Running" : status === "warm" ? "Warm: opens instantly" : undefined}
-                    >
-                      {status === "running" ? (
-                        <LoaderCircle size={14} className="spin" />
-                      ) : (
+                    <span className="session-status" title={status === "warm" ? "Warm: opens instantly" : undefined}>
+                      {status !== "running" && (
                         <>
                           <button
                             className="row-action"
