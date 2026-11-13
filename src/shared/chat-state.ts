@@ -1,7 +1,6 @@
-import type { JsonAgentSessionEvent } from "@earendil-works/pi-coding-agent";
+import type { AgentMessage, AssistantMessage, JsonAgentSessionEvent } from "./pi-rpc.ts";
 
-export type AgentMessage = Extract<JsonAgentSessionEvent, { type: "message_end" }>["message"];
-export type AssistantMessage = Extract<AgentMessage, { role: "assistant" }>;
+export type { AgentMessage, AssistantMessage } from "./pi-rpc.ts";
 type AssistantBlock = AssistantMessage["content"][number];
 type StreamUpdate = Extract<JsonAgentSessionEvent, { type: "message_update" }>["assistantMessageEvent"];
 

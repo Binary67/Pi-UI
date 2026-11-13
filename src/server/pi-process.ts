@@ -1,15 +1,13 @@
 import { type ChildProcessByStdio, spawn } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
-import { fileURLToPath } from "node:url";
 import type {
   JsonAgentSessionEvent,
   RpcCommand,
   RpcExtensionUIRequest,
   RpcExtensionUIResponse,
   RpcResponse,
-} from "@earendil-works/pi-coding-agent";
+} from "../shared/pi-rpc.ts";
 
-const RPC_ENTRY = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent/rpc-entry"));
 const DIALOG_METHODS = new Set(["select", "confirm", "input", "editor"]);
 
 type PiRecord = JsonAgentSessionEvent | RpcExtensionUIRequest | RpcResponse;
@@ -18,9 +16,11 @@ type RpcSuccess<T extends RpcCommand> = Extract<RpcResponse, { command: T["type"
 /** One `pi --mode rpc` child process, controlled through JSONL on stdin and stdout. */
 export class PiProcess {
   private readonly child: ChildProcessByStdio<Writable, Readable, null>;
+  private readonly closed: Promise<void>;
   private readonly pending = new Map<string, { resolve: (response: RpcResponse) => void; reject: (error: Error) => void }>();
   private nextId = 0;
   private buffer = "";
+  private failure?: Error;
 
   constructor(
     cwd: string,
@@ -28,7 +28,11 @@ export class PiProcess {
     onEvent: (event: JsonAgentSessionEvent) => void,
     onExit: (code: number | null) => void,
   ) {
-    this.child = spawn(process.execPath, [RPC_ENTRY, ...args], { cwd, stdio: ["pipe", "pipe", "inherit"] });
+    this.child = spawn("pi", ["--mode", "rpc", ...args], { cwd, stdio: ["pipe", "pipe", "inherit"] });
+    this.child.on("error", (error) =>
+      this.fail(new Error(`Could not start Pi: ${error.message}. Make sure pi is installed and available on PATH.`)),
+    );
+    this.child.stdin.on("error", (error) => this.fail(error));
 
     // Split only on LF: JSON strings can contain U+2028 and U+2029, so readline is not safe here.
     this.child.stdout.setEncoding("utf8");
@@ -42,15 +46,18 @@ export class PiProcess {
       }
     });
 
-    this.child.on("close", (code) => {
-      for (const { reject } of this.pending.values()) reject(new Error(`Pi exited with code ${code}`));
-      this.pending.clear();
-      onExit(code);
+    this.closed = new Promise((resolve) => {
+      this.child.on("close", (code) => {
+        this.fail(new Error(`Pi exited with code ${code}`));
+        onExit(code);
+        resolve();
+      });
     });
   }
 
   /** Send a command and wait for its response. Rejects when Pi reports a failure. */
   send<T extends RpcCommand>(command: T): Promise<RpcSuccess<T>> {
+    if (this.failure) return Promise.reject(this.failure);
     const id = String(this.nextId++);
     return new Promise((resolve, reject) => {
       const settle = (response: RpcResponse) =>
@@ -67,13 +74,19 @@ export class PiProcess {
 
   /** True after the process has exited. */
   get exited(): boolean {
-    return this.child.exitCode !== null || this.child.signalCode !== null;
+    return this.failure !== undefined || this.child.exitCode !== null || this.child.signalCode !== null;
   }
 
   /** Close stdin, so Pi finishes pending work and exits. Resolves when the process has exited. */
   stop(): Promise<void> {
     this.child.stdin.end();
-    return new Promise((resolve) => this.child.once("close", () => resolve()));
+    return this.closed;
+  }
+
+  private fail(error: Error): void {
+    this.failure ??= error;
+    for (const { reject } of this.pending.values()) reject(this.failure);
+    this.pending.clear();
   }
 
   private handleRecord(record: PiRecord, onEvent: (event: JsonAgentSessionEvent) => void): void {

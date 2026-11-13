@@ -3,7 +3,7 @@ import type {
   RpcCommand,
   RpcSessionState,
   SessionStats,
-} from "@earendil-works/pi-coding-agent";
+} from "./pi-rpc.ts";
 import type { ChatState } from "./chat-state.ts";
 
 /** An image attached to a prompt, in the Pi wire format: base64 data and a MIME type. */
