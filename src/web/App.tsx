@@ -12,6 +12,7 @@ import {
   Square,
   SquarePen,
   X,
+  Zap,
 } from "lucide-react";
 import {
   type ChangeEvent,
@@ -365,7 +366,10 @@ export function App() {
                     >
                       {item.title}
                     </button>
-                    <span className="session-status" title={status === "warm" ? "Warm: opens instantly" : undefined}>
+                    <span className="session-warm" title={status === "warm" ? "Warm: opens instantly" : undefined}>
+                      {status === "warm" && <Zap size={12} />}
+                    </span>
+                    <span className="session-status">
                       {status !== "running" && (
                         <>
                           <button
@@ -375,7 +379,7 @@ export function App() {
                           >
                             <X size={14} />
                           </button>
-                          {status === "warm" && <span className="warm-dot" />}
+                          {item.unread && <span className="unread-dot" />}
                         </>
                       )}
                     </span>

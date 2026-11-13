@@ -227,7 +227,17 @@ textarea::placeholder {
   font-weight: 500;
 }
 
-/* One slot for the status marker and the remove button. They share its cell. */
+/* The warm marker has its own slot, so the titles of all rows end at the same place. */
+.session-warm {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 16px;
+  height: 24px;
+  color: var(--text-3);
+}
+
+/* One slot for the unread marker and the remove button. They share its cell. */
 .session-status {
   display: grid;
   flex: none;
@@ -241,18 +251,18 @@ textarea::placeholder {
   grid-area: 1 / 1;
 }
 
-.warm-dot {
+.unread-dot {
   width: 8px;
   height: 8px;
-  background: var(--warm);
+  background: var(--accent);
   border-radius: 50%;
   pointer-events: none;
   transition: opacity 0.15s;
 }
 
 /* When the remove button shows, it takes the place of the dot. */
-.session-row:hover .row-action + .warm-dot,
-.row-action:focus-visible + .warm-dot {
+.session-row:hover .row-action + .unread-dot,
+.row-action:focus-visible + .unread-dot {
   opacity: 0;
 }
 

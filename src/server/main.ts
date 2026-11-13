@@ -5,7 +5,15 @@ import { type WebSocket, WebSocketServer } from "ws";
 import { applyEvent, type ChatState, emptyChatState } from "../shared/chat-state.ts";
 import type { ClientMessage, FolderListing, ModelRef, ServerMessage, SessionInfo } from "../shared/protocol.ts";
 import { PiProcess } from "./pi-process.ts";
-import { addProject, keepSession, listProjects, removeProject, removeSession } from "./projects.ts";
+import {
+  addProject,
+  keepSession,
+  listProjects,
+  markRead,
+  markUnread,
+  removeProject,
+  removeSession,
+} from "./projects.ts";
 
 const HOST = "127.0.0.1";
 const PORT = 3001;
@@ -104,7 +112,14 @@ async function launch(cwd: string, file?: string): Promise<Session> {
       // A refresh fails only when the Pi process stops. The exit handler reports that.
       if (event.type === "message_end" || event.type === "compaction_end") refresh(session).catch(() => {});
       if (event.type === "agent_start" || event.type === "agent_settled") broadcast(statusMessage());
-      if (event.type === "agent_settled") release(session.file);
+      if (event.type === "agent_settled") {
+        // A run that ends while no page shows its session stays unread in the sidebar until a page opens it.
+        if (![...views.values()].includes(session.file)) {
+          markUnread(session.cwd, session.file);
+          void broadcastProjects();
+        }
+        release(session.file);
+      }
     },
     (code) => {
       // A spare, or a session that the server stopped, is not in the map.
@@ -205,6 +220,7 @@ async function start(socket: WebSocket, folder: string, file?: string): Promise<
     type: "snapshot",
     session: { cwd: session.cwd, file: session.file, state: session.state, info: session.info },
   });
+  if (markRead(session.file)) void broadcastProjects();
   if (previous) release(previous);
   prepareSpare(cwd);
 }

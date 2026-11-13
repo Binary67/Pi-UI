@@ -41,7 +41,8 @@ export type ClientMessage =
 
 export type SessionSnapshot = { cwd: string; file: string; state: ChatState; info: SessionInfo };
 
-export type SessionSummary = { file: string; title: string };
+/** `unread` is true when the last run ended while no page showed the session, and no page opened it since. */
+export type SessionSummary = { file: string; title: string; unread: boolean };
 
 /** A live session runs now, or it is warm: idle, with a Pi process that is ready. */
 export type SessionStatus = "running" | "warm";
