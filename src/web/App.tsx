@@ -36,6 +36,7 @@ import type {
   SessionStatus,
 } from "../shared/protocol.ts";
 import { Banner, MessageView, Skeleton, type ToolResults, WorkGroup, Working } from "./Message.tsx";
+import { SessionFooter } from "./SessionFooter.tsx";
 
 /** Distance in pixels from the page bottom that still counts as "at the bottom". */
 const BOTTOM_SLACK = 80;
@@ -155,6 +156,9 @@ export function App() {
             setSession((current) =>
               current?.file === data.file ? { ...current, state: applyEvent(current.state, data.event) } : current,
             );
+            break;
+          case "info":
+            setSession((current) => (current?.file === data.file ? { ...current, info: data.info } : current));
             break;
           case "error":
             setErrors((current) => [...current, data.message]);
@@ -472,7 +476,14 @@ export function App() {
                     </button>
                   )}
                 </div>
-                <p className="hint">Enter to send · Shift+Enter for new line</p>
+                <SessionFooter
+                  info={session.info}
+                  disabled={running}
+                  onSetModel={(model) =>
+                    send({ type: "set_model", file: session.file, provider: model.provider, modelId: model.id })
+                  }
+                  onSetThinkingLevel={(level) => send({ type: "set_thinking_level", file: session.file, level })}
+                />
               </div>
             </div>
           </>

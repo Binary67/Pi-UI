@@ -1035,11 +1035,253 @@ textarea::placeholder {
   background: rgb(29 29 31 / 0.15);
 }
 
-.hint {
-  margin: 8px 0 0;
-  font-size: 12px;
+/* Session footer: pickers and usage below the composer */
+
+.session-footer {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: 6px;
+  padding: 0 6px;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+
+/* Menu: a ghost pill that opens a list above it, in the style of a macOS menu */
+
+.menu {
+  position: relative;
+  min-width: 0;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 8px;
+  border-radius: 8px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.pill svg {
+  flex: none;
+}
+
+.pill:hover:not(:disabled),
+.pill[aria-expanded="true"] {
+  color: var(--text);
+  background: rgb(29 29 31 / 0.06);
+}
+
+.pill-label {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menu-panel {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+  padding: 5px;
+  font-size: 13px;
+  color: var(--text);
+  background: rgb(255 255 255 / 0.78);
+  -webkit-backdrop-filter: saturate(180%) blur(24px);
+  backdrop-filter: saturate(180%) blur(24px);
+  border: 0.5px solid rgb(0 0 0 / 0.12);
+  border-radius: 12px;
+  box-shadow: 0 2px 6px rgb(0 0 0 / 0.06), 0 12px 32px rgb(0 0 0 / 0.14);
+  transform-origin: bottom left;
+  animation: menu-in 0.14s ease-out;
+}
+
+/* A fixed width, so the panel does not change size while the search filters the list. */
+.menu-panel:has(.menu-search) {
+  width: 280px;
+}
+
+.menu-search {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
   color: var(--text-3);
-  text-align: center;
+  background: rgb(29 29 31 / 0.06);
+  border-radius: 7px;
+}
+
+.menu-search svg {
+  flex: none;
+}
+
+.menu-search input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  color: var(--text);
+  background: none;
+  border: none;
+  outline: none;
+}
+
+.menu-search + .menu-list {
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid var(--border);
+}
+
+.menu-list {
+  max-height: 320px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+/* The highlighted row shows the focus of the list. */
+.menu-list:focus-visible {
+  outline: none;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 12px 0 4px;
+  white-space: nowrap;
+  border-radius: 6px;
+  cursor: default;
+}
+
+.menu-item.active {
+  color: #ffffff;
+  background: var(--accent);
+}
+
+.menu-check {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 18px;
+}
+
+/* The group headings and the empty text line up with the item labels, after the check column. */
+.menu-group {
+  padding: 8px 12px 4px 26px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.menu-group:first-child {
+  padding-top: 4px;
+}
+
+.menu-empty {
+  padding: 6px 12px 6px 26px;
+  color: var(--text-3);
+}
+
+.usage {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 4px 8px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  border-radius: 8px;
+}
+
+.usage-context {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ring {
+  flex: none;
+  fill: none;
+  stroke-width: 2;
+}
+
+.ring-track {
+  stroke: var(--border);
+}
+
+.ring-fill {
+  stroke: currentColor;
+  transition: stroke-dashoffset 0.3s;
+}
+
+.usage-bar {
+  height: 4px;
+  margin: 6px 0 8px;
+  overflow: hidden;
+  color: var(--text-2);
+  background: var(--border);
+  border-radius: 2px;
+}
+
+.usage-bar div {
+  height: 100%;
+  background: currentColor;
+  transition: width 0.3s;
+}
+
+.usage.warn :is(.usage-context, .usage-bar) {
+  color: var(--warm);
+}
+
+.usage.danger :is(.usage-context, .usage-bar) {
+  color: var(--danger);
+}
+
+.usage-card {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 1;
+  width: 220px;
+  padding: 12px 14px;
+  color: var(--text-2);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(4px);
+  transition: opacity 0.15s, transform 0.15s, visibility 0.15s;
+}
+
+.usage:hover .usage-card,
+.usage:focus-visible .usage-card {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+}
+
+.usage-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 0;
+}
+
+.usage-row span:last-child {
+  color: var(--text);
 }
 
 .scroll-down {
@@ -1064,6 +1306,13 @@ textarea::placeholder {
   from {
     opacity: 0;
     transform: translateY(6px);
+  }
+}
+
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.96);
   }
 }
 

@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { type WebSocket, WebSocketServer } from "ws";
 import { applyEvent, type ChatState, emptyChatState } from "../shared/chat-state.ts";
-import type { ClientMessage, FolderListing, ServerMessage } from "../shared/protocol.ts";
+import type { ClientMessage, FolderListing, ModelRef, ServerMessage, SessionInfo } from "../shared/protocol.ts";
 import { PiProcess } from "./pi-process.ts";
 import { addProject, keepSession, listProjects, removeProject, removeSession } from "./projects.ts";
 
@@ -15,7 +15,7 @@ const ALLOWED_ORIGINS = new Set(["http://localhost:5173", "http://127.0.0.1:5173
 // An idle session that no page shows stays warm this long, so it opens again at once. Then its Pi process stops.
 const WARM_MS = 10 * 60 * 1000;
 
-type Session = { cwd: string; file: string; pi: PiProcess; state: ChatState; timer?: NodeJS.Timeout };
+type Session = { cwd: string; file: string; pi: PiProcess; state: ChatState; info: SessionInfo; timer?: NodeJS.Timeout };
 
 // Sessions belong to the server, not to a page. Each live session has its own Pi process, so all of them can run at
 // the same time. A session stops after it was idle for WARM_MS with no page that shows it. Its file keeps it for a
@@ -58,6 +58,32 @@ async function broadcastProjects(): Promise<void> {
   broadcast({ type: "projects", projects: await listProjects() });
 }
 
+function modelRef({ provider, id }: ModelRef): ModelRef {
+  return { provider, id };
+}
+
+async function readInfo(pi: PiProcess): Promise<SessionInfo> {
+  const [state, models, levels, stats] = await Promise.all([
+    pi.send({ type: "get_state" }),
+    pi.send({ type: "get_available_models" }),
+    pi.send({ type: "get_available_thinking_levels" }),
+    pi.send({ type: "get_session_stats" }),
+  ]);
+  return {
+    model: state.data.model && modelRef(state.data.model),
+    models: models.data.models.map(modelRef),
+    thinkingLevel: state.data.thinkingLevel,
+    thinkingLevels: levels.data.levels,
+    stats: stats.data,
+  };
+}
+
+/** Read the info of `session` again, and send it to the pages that show the session. */
+async function refresh(session: Session): Promise<void> {
+  session.info = await readInfo(session.pi);
+  sendToViewers(session.file, { type: "info", file: session.file, info: session.info });
+}
+
 /** Start a Pi process for the session in `file`, or for a new session in `cwd`. The session is not live yet. */
 async function launch(cwd: string, file?: string): Promise<Session> {
   // Two Pi processes must not write to the same file.
@@ -75,6 +101,8 @@ async function launch(cwd: string, file?: string): Promise<Session> {
         keepSession(session.cwd, session.file);
         void broadcastProjects();
       }
+      // A refresh fails only when the Pi process stops. The exit handler reports that.
+      if (event.type === "message_end" || event.type === "compaction_end") refresh(session).catch(() => {});
       if (event.type === "agent_start" || event.type === "agent_settled") broadcast(statusMessage());
       if (event.type === "agent_settled") release(session.file);
     },
@@ -99,6 +127,7 @@ async function launch(cwd: string, file?: string): Promise<Session> {
     file: state.data.sessionFile!,
     pi,
     state: { ...emptyChatState, messages: history.data.messages },
+    info: await readInfo(pi),
   };
   return session;
 }
@@ -172,7 +201,10 @@ async function start(socket: WebSocket, folder: string, file?: string): Promise<
   // Set the view and send the snapshot in the same tick, so no event falls between them.
   const previous = views.get(socket);
   views.set(socket, session.file);
-  send(socket, { type: "snapshot", session: { cwd: session.cwd, file: session.file, state: session.state } });
+  send(socket, {
+    type: "snapshot",
+    session: { cwd: session.cwd, file: session.file, state: session.state, info: session.info },
+  });
   if (previous) release(previous);
   prepareSpare(cwd);
 }
@@ -213,8 +245,20 @@ async function handle(socket: WebSocket, message: ClientMessage): Promise<void> 
   }
   const session = sessions.get(message.file);
   if (!session) throw new Error("Start a session first.");
-  if (message.type === "prompt") await session.pi.send({ type: "prompt", message: message.text, images: message.images });
-  else await session.pi.send({ type: "abort" });
+  switch (message.type) {
+    case "prompt":
+      await session.pi.send({ type: "prompt", message: message.text, images: message.images });
+      return;
+    case "abort":
+      await session.pi.send({ type: "abort" });
+      return;
+    case "set_model":
+      await session.pi.send({ type: "set_model", provider: message.provider, modelId: message.modelId });
+      return refresh(session);
+    case "set_thinking_level":
+      await session.pi.send({ type: "set_thinking_level", level: message.level });
+      return refresh(session);
+  }
 }
 
 const server = new WebSocketServer({

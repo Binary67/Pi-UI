@@ -1,8 +1,30 @@
-import type { JsonAgentSessionEvent, RpcCommand } from "@earendil-works/pi-coding-agent";
+import type {
+  JsonAgentSessionEvent,
+  RpcCommand,
+  RpcSessionState,
+  SessionStats,
+} from "@earendil-works/pi-coding-agent";
 import type { ChatState } from "./chat-state.ts";
 
 /** An image attached to a prompt, in the Pi wire format: base64 data and a MIME type. */
 export type PromptImage = NonNullable<Extract<RpcCommand, { type: "prompt" }>["images"]>[number];
+
+export type ThinkingLevel = RpcSessionState["thinkingLevel"];
+
+/** The parts of a Pi model that the page shows. The full model can contain provider headers. */
+export type ModelRef = Pick<NonNullable<RpcSessionState["model"]>, "provider" | "id">;
+
+/** The model, thinking level, and usage of a session: the data of the TUI footer. */
+export type SessionInfo = {
+  /** Absent when no model is selected. */
+  model?: ModelRef;
+  /** The models that have credentials. */
+  models: ModelRef[];
+  thinkingLevel: ThinkingLevel;
+  /** The levels of the model. Only "off" for a model without reasoning. */
+  thinkingLevels: ThinkingLevel[];
+  stats: SessionStats;
+};
 
 /** Messages from the browser to the server. */
 export type ClientMessage =
@@ -10,12 +32,14 @@ export type ClientMessage =
   | { type: "start"; cwd: string; file?: string }
   | { type: "prompt"; file: string; text: string; images: PromptImage[] }
   | { type: "abort"; file: string }
+  | { type: "set_model"; file: string; provider: string; modelId: string }
+  | { type: "set_thinking_level"; file: string; level: ThinkingLevel }
   | { type: "remove_project"; path: string }
   | { type: "remove_session"; file: string }
   /** List the subfolders of `path`, or of the home folder when `path` is empty. */
   | { type: "list_folders"; path: string };
 
-export type SessionSnapshot = { cwd: string; file: string; state: ChatState };
+export type SessionSnapshot = { cwd: string; file: string; state: ChatState; info: SessionInfo };
 
 export type SessionSummary = { file: string; title: string };
 
@@ -37,4 +61,6 @@ export type ServerMessage =
   | { type: "status"; sessions: Record<string, SessionStatus> }
   | { type: "folders"; listing: FolderListing }
   | { type: "event"; file: string; event: JsonAgentSessionEvent }
+  /** New model, thinking level, or usage data for the session in `file`. */
+  | { type: "info"; file: string; info: SessionInfo }
   | { type: "error"; message: string };
