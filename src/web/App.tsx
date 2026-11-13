@@ -105,7 +105,8 @@ export function App() {
     let timer: ReturnType<typeof setTimeout> | undefined;
 
     function connect() {
-      socket = new WebSocket(`ws://${location.host}/ws`);
+      // An HTTPS page, such as the tailnet URL, must use a secure socket.
+      socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
       socket.onopen = () => {
         // Only an open socket sends. Clicks while the socket connects go to the closed one and are dropped.
         socketRef.current = socket;

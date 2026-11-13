@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev:server": "node src/server/main.ts",
+    "dev:server": "node --env-file-if-exists=.env src/server/main.ts",
     "dev:web": "vite",
     "typecheck": "tsc --noEmit"
   },

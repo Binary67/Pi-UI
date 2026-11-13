@@ -19,8 +19,14 @@ import { forkSession } from "./session-files.ts";
 
 const HOST = "127.0.0.1";
 const PORT = 3001;
-// Only the Vite dev page may connect. Other websites open in the browser must not control Pi.
-const ALLOWED_ORIGINS = new Set(["http://localhost:5173", "http://127.0.0.1:5173"]);
+// The tailnet URL of this Mac, from `.env`. Empty or absent, remote access is off.
+const REMOTE_URL = process.env.PI_UI_REMOTE_URL || null;
+// Only the Vite dev page, locally or at REMOTE_URL, may connect. Other websites open in the browser must not control Pi.
+const ALLOWED_ORIGINS = new Set([
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  ...(REMOTE_URL ? [new URL(REMOTE_URL).origin] : []),
+]);
 
 // An idle session that no page shows stays warm this long, so it opens again at once. Then its Pi process stops.
 const WARM_MS = 10 * 60 * 1000;
