@@ -202,6 +202,16 @@ export function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [runningFile]);
 
+  // The keyboard of the composer shrinks the page. A reader at the bottom stays at the bottom, above the composer.
+  useEffect(() => {
+    if (!atBottom) return;
+    const onResize = () => {
+      if (document.activeElement === textareaRef.current) scrollToBottom("instant");
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [atBottom]);
+
   // Follow new content only when the reader is already at the bottom.
   useEffect(() => {
     if (atBottom) scrollToBottom("instant");
