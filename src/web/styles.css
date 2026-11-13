@@ -922,6 +922,38 @@ textarea::placeholder {
   color: var(--danger);
 }
 
+.diff-line {
+  display: grid;
+  grid-template-columns: auto 2ch minmax(0, 1fr);
+}
+
+.diff-line.add {
+  background: rgb(52 199 89 / 0.15);
+}
+
+.diff-line.del {
+  background: rgb(255 59 48 / 0.12);
+}
+
+.diff-num {
+  padding-right: 1ch;
+  color: var(--text-3);
+  user-select: none;
+}
+
+.diff-sign {
+  text-align: center;
+  user-select: none;
+}
+
+.diff-line.add .diff-sign {
+  color: #248a3d;
+}
+
+.diff-line.del .diff-sign {
+  color: var(--danger);
+}
+
 /* Status and errors */
 
 .banner {

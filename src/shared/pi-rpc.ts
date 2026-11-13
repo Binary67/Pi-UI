@@ -21,6 +21,8 @@ export type AgentMessage =
       toolCallId: string;
       toolName: string;
       content: (TextContent | ImageContent)[];
+      /** The edit tool sets `diff`. */
+      details?: { diff?: string };
       isError: boolean;
       timestamp: number;
     }

@@ -179,8 +179,27 @@ function summarize(args: Record<string, unknown>): string {
   return typeof value === "string" ? value : "";
 }
 
+/** Pi's display diff. Each line is a sign (`+`, `-`, or space), a padded line number, and the text. */
+function DiffView({ diff }: { diff: string }) {
+  return (
+    <pre className="diff">
+      {diff.split("\n").map((line, index) => {
+        const [, sign, number, text] = /^([+\- ])( *\d*) (.*)$/.exec(line)!;
+        return (
+          <div key={index} className={`diff-line${sign === "+" ? " add" : sign === "-" ? " del" : ""}`}>
+            <span className="diff-num">{number}</span>
+            <span className="diff-sign">{sign}</span>
+            <span>{text}</span>
+          </div>
+        );
+      })}
+    </pre>
+  );
+}
+
 function ToolCard({ call, result, running }: { call: ToolCall; result?: ToolResult; running: boolean }) {
   const [open, setOpen] = useState(false);
+  const diff = result?.details?.diff;
   const Icon = TOOL_ICONS[call.name] ?? Wrench;
   const status = result ? (result.isError ? "error" : "done") : running ? "running" : "stopped";
   return (
@@ -199,8 +218,17 @@ function ToolCard({ call, result, running }: { call: ToolCall; result?: ToolResu
       </button>
       {open && (
         <div className="tool-body">
-          <div className="tool-label">Arguments</div>
-          <pre>{JSON.stringify(call.arguments, null, 2)}</pre>
+          {diff ? (
+            <>
+              <div className="tool-label">Diff</div>
+              <DiffView diff={diff} />
+            </>
+          ) : (
+            <>
+              <div className="tool-label">Arguments</div>
+              <pre>{JSON.stringify(call.arguments, null, 2)}</pre>
+            </>
+          )}
           {result && (
             <>
               <div className="tool-label">{result.isError ? "Error" : "Output"}</div>
