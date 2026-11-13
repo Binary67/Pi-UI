@@ -213,12 +213,19 @@ textarea::placeholder {
 }
 
 .session-open {
+  display: flex;
   flex: 1;
+  gap: 4px;
+  align-items: center;
   min-width: 0;
   padding: 7px 10px;
-  overflow: hidden;
   font-size: 14px;
   text-align: left;
+}
+
+.session-title {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -227,13 +234,12 @@ textarea::placeholder {
   font-weight: 500;
 }
 
-/* The warm marker has its own slot, so the titles of all rows end at the same place. */
+/* The warm marker has its own slot, so the titles of all rows start at the same place. */
 .session-warm {
   display: grid;
   flex: none;
   place-items: center;
   width: 16px;
-  height: 24px;
   color: var(--text-3);
 }
 

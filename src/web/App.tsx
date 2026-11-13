@@ -360,15 +360,17 @@ export function App() {
                 return (
                   <li key={item.file} className={active ? "session-row active" : "session-row"}>
                     <button
-                      className={status === "running" ? "session-open shimmer" : "session-open"}
+                      className="session-open"
                       onClick={() => (active ? setPicking(false) : start(project.path, item.file))}
                       title={item.title}
                     >
-                      {item.title}
+                      <span className="session-warm" title={status ? "Warm: opens instantly" : undefined}>
+                        {status && <Zap size={12} />}
+                      </span>
+                      <span className={status === "running" ? "session-title shimmer" : "session-title"}>
+                        {item.title}
+                      </span>
                     </button>
-                    <span className="session-warm" title={status === "warm" ? "Warm: opens instantly" : undefined}>
-                      {status === "warm" && <Zap size={12} />}
-                    </span>
                     <span className="session-status">
                       {status !== "running" && (
                         <>
