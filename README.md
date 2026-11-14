@@ -42,6 +42,11 @@ a workflow icon. A row shows "New orchestrator" until the first message of the o
 **New orchestrator** in the header of an orchestrator works the same way. So a project has at most 1 empty
 orchestrator. The other orchestrators stay.
 
+The subagent sessions of an orchestrator show as child rows under its row, in the start order of the tasks. They do not
+show in the list of sessions. An orchestrator with child rows has a chevron. The chevron folds and unfolds the child
+rows, and a click on the title still opens the orchestrator. Orchestrators start folded. An orchestrator also shows its
+child rows while the page shows one of its task sessions. A child row works like a session row, with its own **X**.
+
 The **X** of an orchestrator row removes the orchestrator from the sidebar, with the sessions of its tasks. When tasks
 are running or in review, the UI asks first, because their unmerged work is lost. The server cancels the active tasks:
 their subagents stop, and their worktrees and branches are deleted. The session files stay. The **X** is hidden while
