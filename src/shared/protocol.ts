@@ -29,6 +29,16 @@ export type SessionInfo = {
   stats: SessionStats;
 };
 
+/** The git branch of the folder where a session works. */
+export type BranchInfo = {
+  /** The current branch. At a detached HEAD, the short hash of the commit. */
+  current: string;
+  /** True at a detached HEAD. */
+  detached: boolean;
+  /** The local branches, sorted by name, without the `pi-ui/*` task branches. */
+  branches: string[];
+};
+
 /** Messages from the browser to the server. */
 export type ClientMessage =
   /** Show a new session in `cwd`, or the session in `file`. A session that is not live starts in a new Pi process. */
@@ -46,6 +56,10 @@ export type ClientMessage =
   | { type: "set_thinking_level"; file: string; level: ThinkingLevel }
   /** Copy the session in `file` up to its user message with `timestamp` into a new session, then show it. */
   | { type: "fork"; file: string; timestamp: number }
+  /** Read the branch of the session in `file` again. The answer is a `branch` message. */
+  | { type: "list_branches"; file: string }
+  /** Switch the project of the session in `file` to `branch`. With `create`, make the branch from the current commit first. */
+  | { type: "switch_branch"; file: string; branch: string; create: boolean }
   | { type: "remove_project"; path: string }
   /** An orchestrator goes with the sessions of its tasks. Its active tasks are cancelled. */
   | { type: "remove_session"; file: string }
@@ -102,6 +116,8 @@ export type ServerMessage =
   | { type: "event"; file: string; event: JsonAgentSessionEvent }
   /** New model, thinking level, or usage data for the session in `file`. */
   | { type: "info"; file: string; info: SessionInfo }
+  /** The branch of the session in `file`. Null when its folder is not in a git repository. */
+  | { type: "branch"; file: string; branch: BranchInfo | null }
   /** The text of the queued messages that an abort removed, for the composer. */
   | { type: "restore"; text: string }
   /** The text of the voice recording of a `transcribe` message, for the composer. */

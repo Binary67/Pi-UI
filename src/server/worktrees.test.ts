@@ -12,9 +12,11 @@ import {
   commitAll,
   diffSince,
   isMerged,
+  readBranch,
   removeLeftovers,
   removeWorktree,
   runSetup,
+  switchBranch,
 } from "./worktrees.ts";
 
 // The commits of the tests need an identity, also on a machine without a git configuration.
@@ -114,4 +116,60 @@ test("the startup sweep keeps the active worktree and branch, and deletes the re
   assert.equal(git(repo, "branch", "--list", leak.branch), "");
   assert.match(git(repo, "branch", "--list", "other"), /other/);
   assert.doesNotMatch(git(repo, "worktree", "list"), /task-2/);
+});
+
+test("a branch is read from a repository, with sorted names and without task branches", async (t) => {
+  const dir = await fixture(t);
+  assert.equal(await readBranch(dir), null);
+  const repo = join(dir, "repo");
+  git(dir, "init", "-q", "-b", "main", repo);
+  // A repository without a commit has its unborn branch.
+  assert.deepEqual(await readBranch(repo), { current: "main", detached: false, branches: [] });
+  await writeFile(join(repo, "a.txt"), "a\n");
+  git(repo, "add", "-A");
+  git(repo, "commit", "-q", "-m", "first");
+  git(repo, "branch", "zeta");
+  git(repo, "branch", "alpha");
+  git(repo, "branch", "feature/x");
+  git(repo, "branch", "pi-ui/x/task-1");
+  assert.deepEqual(await readBranch(repo), {
+    current: "main",
+    detached: false,
+    branches: ["alpha", "feature/x", "main", "zeta"],
+  });
+  // A subfolder belongs to the repository.
+  await mkdir(join(repo, "sub"));
+  assert.equal((await readBranch(join(repo, "sub")))?.current, "main");
+
+  git(repo, "checkout", "-q", "--detach");
+  const hash = git(repo, "rev-parse", "--short", "HEAD").trim();
+  assert.deepEqual(await readBranch(repo), {
+    current: hash,
+    detached: true,
+    branches: ["alpha", "feature/x", "main", "zeta"],
+  });
+});
+
+test("a switch creates a branch and changes to it, and a failed switch gives the git message", async (t) => {
+  const dir = await fixture(t);
+  git(dir, "init", "-q", "-b", "main");
+  await writeFile(join(dir, "a.txt"), "a\n");
+  git(dir, "add", "-A");
+  git(dir, "commit", "-q", "-m", "first");
+
+  await switchBranch(dir, "work", true);
+  assert.equal((await readBranch(dir))?.current, "work");
+  await switchBranch(dir, "main", false);
+  assert.equal((await readBranch(dir))?.current, "main");
+  await assert.rejects(switchBranch(dir, "missing", false), /invalid reference: missing/);
+  await assert.rejects(switchBranch(dir, "work", true), /already exists/);
+  await assert.rejects(switchBranch(dir, "bad name", true), /not a valid branch name/);
+
+  // Uncommitted changes that conflict with the other branch stop the switch.
+  await switchBranch(dir, "work", false);
+  await writeFile(join(dir, "a.txt"), "work\n");
+  git(dir, "commit", "-q", "-am", "work");
+  await switchBranch(dir, "main", false);
+  await writeFile(join(dir, "a.txt"), "dirty\n");
+  await assert.rejects(switchBranch(dir, "work", false), /would be overwritten/);
 });

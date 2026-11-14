@@ -55,9 +55,11 @@ import {
   commitAll,
   diffSince,
   isMerged,
+  readBranch,
   removeLeftovers,
   removeWorktree,
   runSetup,
+  switchBranch,
 } from "./worktrees.ts";
 
 const HOST = "127.0.0.1";
@@ -127,6 +129,26 @@ function broadcast(message: ServerMessage): void {
 /** Send `message` to the pages that show the session in `file`. */
 function sendToViewers(file: string, message: ServerMessage): void {
   for (const [socket, viewed] of views) if (viewed === file) send(socket, message);
+}
+
+/** The folder where `session` works: the worktree of its task while the task is running or in review, else its project. */
+function sessionDir(session: Session): string {
+  const task = findTask(session.file)?.task;
+  return task && isActive(task) ? task.worktree : session.cwd;
+}
+
+/** Send the branch of `session` to the page of `socket`. */
+async function sendBranch(socket: WebSocket, session: Session): Promise<void> {
+  send(socket, { type: "branch", file: session.file, branch: await readBranch(sessionDir(session)) });
+}
+
+/** Send the branch of each session that a page shows in the project `cwd` to that page. */
+async function sendProjectBranches(cwd: string): Promise<void> {
+  const shown = [...views].flatMap(([socket, file]) => {
+    const session = sessions.get(file);
+    return session?.cwd === cwd ? [{ socket, session }] : [];
+  });
+  await Promise.all(shown.map(({ socket, session }) => sendBranch(socket, session)));
 }
 
 function statusMessage(): ServerMessage {
@@ -224,6 +246,8 @@ async function launch(cwd: string, file?: string, args: string[] = [], dir = cwd
           void broadcastProjects();
         }
         release(session.file);
+        // The agent can change the branch with bash.
+        sendProjectBranches(session.cwd).catch((error: unknown) => console.error("Could not read the branch:", error));
       }
     },
     (code) => {
@@ -366,6 +390,7 @@ async function start(socket: WebSocket, folder: string, file?: string): Promise<
       session: { cwd: session.cwd, file: session.file, state: session.state, info: session.info },
     });
     if (markRead(session.file)) void broadcastProjects();
+    sendBranch(socket, session).catch((error: unknown) => console.error("Could not read the branch:", error));
   }
   if (previous) release(previous);
   prepareSpare(cwd);
@@ -761,6 +786,23 @@ async function handle(socket: WebSocket, message: ClientMessage): Promise<void> 
       if (text) send(socket, { type: "restore", text });
       await session.pi.send({ type: "abort" });
       return;
+    }
+    case "list_branches":
+      return sendBranch(socket, session);
+    case "switch_branch": {
+      if (task) throw new Error("A task session stays on its task branch.");
+      if ([...sessions.values()].some((other) => other.cwd === session.cwd && other.state.running)) {
+        throw new Error("A session of this project is running. Wait until it ends.");
+      }
+      if (getOrchestrators(session.cwd).some((orchestrator) => orchestrator.tasks.some(isActive))) {
+        throw new Error("An orchestrator of this project has tasks that are running or in review. Finish or cancel them first.");
+      }
+      // The startup sweep deletes the `pi-ui/*` branches that no task owns.
+      if (message.branch.startsWith("-") || message.branch.startsWith("pi-ui/")) {
+        throw new Error("A branch name cannot start with - or pi-ui/.");
+      }
+      await switchBranch(session.cwd, message.branch, message.create);
+      return sendProjectBranches(session.cwd);
     }
     case "set_model":
       await session.pi.send({ type: "set_model", provider: message.provider, modelId: message.modelId });

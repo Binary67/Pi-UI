@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { readdir, rm } from "node:fs/promises";
 import { join, sep } from "node:path";
 import { promisify } from "node:util";
+import type { BranchInfo } from "../shared/protocol.ts";
 
 const exec = promisify(execFile);
 // Diffs and the output of a setup command can be long.
@@ -36,6 +37,28 @@ export async function addWorktree(path: string, dir: string, branch: string): Pr
   const base = (await git(path, ["rev-parse", "HEAD"])).trim();
   await git(path, ["worktree", "add", "-b", branch, dir, base]);
   return base;
+}
+
+/** The branch state of the git repository that contains `dir`. Null when `dir` is not in a git repository. */
+export async function readBranch(dir: string): Promise<BranchInfo | null> {
+  const inside = await git(dir, ["rev-parse", "--is-inside-work-tree"]).catch(() => "");
+  if (inside.trim() !== "true") return null;
+  // A repository without a commit has an unborn branch. A detached HEAD has no branch name.
+  const name = (await git(dir, ["symbolic-ref", "--short", "-q", "HEAD"]).catch(() => "")).trim();
+  const current = name || (await git(dir, ["rev-parse", "--short", "HEAD"])).trim();
+  const listed = await git(dir, ["for-each-ref", "--format=%(refname:lstrip=2)", "refs/heads"]);
+  const branches = listed.split("\n").filter((branch) => branch && !branch.startsWith("pi-ui/")).sort();
+  return { current, detached: !name, branches };
+}
+
+/** Switch the repository in `dir` to `branch`. With `create`, make the branch from the current commit first. */
+export async function switchBranch(dir: string, branch: string, create: boolean): Promise<void> {
+  try {
+    await git(dir, ["switch", ...(create ? ["-c"] : []), branch]);
+  } catch (error) {
+    const { stderr = "", message } = error as { stderr?: string; message: string };
+    throw new Error(stderr.trim() || message);
+  }
 }
 
 /** Run the shell command `command` in `dir`. A failure reports the end of the output. */
