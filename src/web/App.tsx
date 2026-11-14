@@ -108,6 +108,7 @@ export function App() {
   const [images, setImages] = useState<PromptImage[]>([]);
   const [atBottom, setAtBottom] = useState(true);
   const running = session?.state.running ?? false;
+  const showChat = session && !picking && !loading;
 
   useEffect(() => {
     let socket: WebSocket;
@@ -265,18 +266,19 @@ export function App() {
     return () => window.removeEventListener("resize", onResize);
   }, [atBottom]);
 
-  // Follow new content only when the reader is already at the bottom.
-  useEffect(() => {
-    if (atBottom) scrollToBottom("instant");
-  }, [session, errors, atBottom]);
-
-  // Grow the composer with its text, up to a limit.
+  // Grow the composer with its text, up to a limit. Only a change of the text, or a new composer, changes its height.
   useLayoutEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
     textarea.style.height = "auto";
     textarea.style.height = `${Math.min(textarea.scrollHeight, COMPOSER_MAX_HEIGHT)}px`;
-  }, [text, session, picking]);
+  }, [text, showChat]);
+
+  // Follow new content only when the reader is already at the bottom. The scroll comes before the paint, so the new
+  // content does not show first at the old position. It comes after the composer height, which changes the page height.
+  useLayoutEffect(() => {
+    if (atBottom) scrollToBottom("instant");
+  }, [session, errors, atBottom]);
 
   function send(message: ClientMessage) {
     socketRef.current?.send(JSON.stringify(message));
@@ -351,7 +353,6 @@ export function App() {
     }
   }
 
-  const showChat = session && !picking && !loading;
   const messages = session?.state.messages ?? [];
   const streaming = session?.state.streaming ?? null;
   const queued = session
