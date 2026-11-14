@@ -33,13 +33,14 @@ from the same installation. Pi upgrades may require updating this integration.
 ## Orchestrator
 
 An orchestrator solves one problem of a project with subagents. **Orchestrator** in the sidebar shows a list of
-projects and a folder field. A choice starts a new orchestrator in that project. For the next problem, start a new
-orchestrator with a fresh context.
+projects and a folder field. A choice opens the empty orchestrator of that project when it has one (an orchestrator
+without a message). Otherwise it starts a new orchestrator. For the next problem, start a new orchestrator with a fresh
+context.
 
 A project can have many orchestrators. The sidebar lists them under the project, newest first, above the sessions, with
 a workflow icon. A row shows "New orchestrator" until the first message of the orchestrator gives it a title.
-**New orchestrator** in the header of an orchestrator starts another orchestrator in the same project. The other
-orchestrators stay.
+**New orchestrator** in the header of an orchestrator works the same way. So a project has at most 1 empty
+orchestrator. The other orchestrators stay.
 
 The **X** of an orchestrator row removes the orchestrator from the sidebar, with the sessions of its tasks. When tasks
 are running or in review, the UI asks first, because their unmerged work is lost. The server cancels the active tasks:
