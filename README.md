@@ -82,6 +82,20 @@ Subagents use the default model of Pi. To use a different model, set `PI_UI_SUBA
 `--model` pattern, such as `azure-foundry-claude/claude-sonnet-5-5:high`. Then restart both servers. The model applies
 only to new subagents. A subagent session keeps its model when it opens again.
 
+## Git branch
+
+The branch picker in the footer of the composer shows the git branch of the
+project. Open it to switch to a local branch. To make a new branch from the
+current commit, type its name in the search field and choose **Create branch**.
+The picker does not show when the folder is not in a git repository.
+
+All sessions of a project share the same folder. A switch changes the files for
+all of them. A switch is blocked while a session of the project runs, or while
+an orchestrator of the project has tasks that are running or in review. The
+picker is then disabled, and its tooltip gives the reason.
+
+A subagent session of a task shows its task branch. It allows no change.
+
 ## Remote access with Tailscale
 
 Open the UI from another device in your tailnet, such as a laptop or a phone.

@@ -1,5 +1,5 @@
-import { Brain, Cpu } from "lucide-react";
-import type { ModelRef, SessionInfo, ThinkingLevel } from "../shared/protocol.ts";
+import { Brain, Cpu, GitBranch } from "lucide-react";
+import type { BranchInfo, ModelRef, SessionInfo, ThinkingLevel } from "../shared/protocol.ts";
 import { Menu } from "./Menu.tsx";
 
 /** Context use above these percentages shows as a warning or a danger, as in the TUI footer. */
@@ -103,10 +103,26 @@ type SessionFooterProps = {
   disabled: boolean;
   onSetModel: (model: ModelRef) => void;
   onSetThinkingLevel: (level: ThinkingLevel) => void;
+  /** The git branch of the session. Null when it is not known yet, or when the folder is not in a git repository. */
+  branch: BranchInfo | null;
+  /** Why the branch cannot change now. Null when it can change. */
+  branchBlock: string | null;
+  /** Read the branch again. */
+  onListBranches: () => void;
+  onSwitchBranch: (branch: string, create: boolean) => void;
 };
 
-/** The row below the composer: model and thinking pickers on the left, usage on the right. */
-export function SessionFooter({ info, disabled, onSetModel, onSetThinkingLevel }: SessionFooterProps) {
+/** The row below the composer: model, thinking, and branch pickers on the left, usage on the right. */
+export function SessionFooter({
+  info,
+  disabled,
+  onSetModel,
+  onSetThinkingLevel,
+  branch,
+  branchBlock,
+  onListBranches,
+  onSwitchBranch,
+}: SessionFooterProps) {
   const { model, models } = info;
   // The menu needs the models of each provider next to each other.
   const providers = [...new Set(models.map((item) => item.provider))];
@@ -136,6 +152,21 @@ export function SessionFooter({ info, disabled, onSetModel, onSetThinkingLevel }
           selected={info.thinkingLevel}
           disabled={disabled}
           onSelect={(key) => onSetThinkingLevel(key as ThinkingLevel)}
+        />
+      )}
+      {branch && (
+        <Menu
+          className="branch-menu"
+          icon={<GitBranch size={14} />}
+          label={branch.current}
+          title={branchBlock ?? "Branch"}
+          items={branch.branches.map((name) => ({ key: name, label: name }))}
+          selected={branch.detached ? "" : branch.current}
+          disabled={branchBlock !== null}
+          searchPlaceholder="Search or create branch"
+          onOpen={onListBranches}
+          create={{ label: (name) => `Create branch "${name}"`, onCreate: (name) => onSwitchBranch(name, true) }}
+          onSelect={(name) => onSwitchBranch(name, false)}
         />
       )}
       <Usage stats={info.stats} />
