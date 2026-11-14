@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { readdir, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -372,12 +373,21 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Show a new orchestrator in the project in `folder` on the page of `socket`. Each orchestrator solves one problem. */
+/**
+ * Show the empty orchestrator of the project in `folder` on the page of `socket`, or a new one when it has none.
+ * Each orchestrator solves one problem.
+ */
 async function startOrchestrator(socket: WebSocket, folder: string): Promise<void> {
   const cwd = toPath(folder);
   const info = await stat(cwd).catch(() => undefined);
   if (!info?.isDirectory()) throw new Error(`Folder not found: ${folder}`);
   if (addProject(cwd)) await broadcastProjects();
+  // An empty orchestrator opens again, so the sidebar gets no second empty row.
+  // Pi saves its file only after the first message.
+  const empty = getOrchestrators(cwd).find(
+    (item) => item.tasks.length === 0 && !existsSync(item.file) && !sessions.get(item.file)?.state.running,
+  );
+  if (empty) return start(socket, cwd, empty.file);
   send(socket, { type: "starting" });
   const { file } = register(await launch(cwd, undefined, ORCHESTRATOR_ARGS));
   addOrchestrator(cwd, file);

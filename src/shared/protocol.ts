@@ -33,7 +33,10 @@ export type SessionInfo = {
 export type ClientMessage =
   /** Show a new session in `cwd`, or the session in `file`. A session that is not live starts in a new Pi process. */
   | { type: "start"; cwd: string; file?: string }
-  /** Show a new orchestrator in the project in `cwd`. Each orchestrator solves one problem. */
+  /**
+   * Show the empty orchestrator of the project in `cwd`, or a new one when it has none. Each orchestrator solves one
+   * problem.
+   */
   | { type: "orchestrator"; cwd: string }
   /** Pi uses `streamingBehavior` only during a run. In an idle session, the prompt starts a run. */
   | { type: "prompt"; file: string; text: string; images: PromptImage[]; streamingBehavior: StreamingBehavior }
