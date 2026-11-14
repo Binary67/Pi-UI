@@ -65,6 +65,8 @@ export type ClientMessage =
   | { type: "remove_session"; file: string }
   /** List the subfolders of `path`, or of the home folder when `path` is empty. */
   | { type: "list_folders"; path: string }
+  /** Ask for the usage of the last 30 days. The answer is a `usage` message. */
+  | { type: "get_usage" }
   /** Ask for the text of a voice recording. `audio` is base64 data without a `data:` URL prefix. */
   | { type: "transcribe"; audio: string; mimeType: string }
   /** Ask for a `pong`, to check that the connection is alive. */
@@ -99,6 +101,23 @@ export type TaskSummary = {
 
 export type FolderListing = { path: string; parent: string; folders: { name: string; path: string }[] };
 
+/** The usage of one local day, from the messages of all Pi session files. */
+export type UsageDay = {
+  /** The local date, `YYYY-MM-DD`. */
+  date: string;
+  /** Sum of `usage.cost.total` of the assistant messages, in dollars. */
+  cost: number;
+  /** Sums of `usage.input`, `usage.cacheRead`, `usage.cacheWrite`, and `usage.output` of the assistant messages. */
+  input: number;
+  cacheRead: number;
+  cacheWrite: number;
+  output: number;
+  /** Sum of `durationMs` of the assistant messages. */
+  durationMs: number;
+  assistantMessages: number;
+  userMessages: number;
+};
+
 /** Messages from the server to the browser. */
 export type ServerMessage =
   /** The tailnet URL that opens this UI on other devices. Null when remote access is off. */
@@ -122,6 +141,8 @@ export type ServerMessage =
   | { type: "restore"; text: string }
   /** The text of the voice recording of a `transcribe` message, for the composer. */
   | { type: "transcript"; text: string }
+  /** The usage of each local day of the last 30 days, oldest first, today last. A day without use has zeros. */
+  | { type: "usage"; days: UsageDay[] }
   /** The answer to a `ping`. */
   | { type: "pong" }
   | { type: "error"; message: string };
