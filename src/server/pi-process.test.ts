@@ -113,3 +113,49 @@ process.stdin.on("data", (chunk) => {
   await pi.stop();
   await assert.rejects(pi.send({ type: "get_state" }), /Pi exited with code 0/);
 });
+
+test("a large record in many small writes is parsed in order with the records that follow it", { timeout: 5000 }, async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-ui-fake-pi-large-"));
+  await writeFile(join(dir, "pi"), `#!${process.execPath}
+const send = (record) => JSON.stringify(record) + "\\n";
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  let newline;
+  while ((newline = buffer.indexOf("\\n")) !== -1) {
+    const command = JSON.parse(buffer.slice(0, newline));
+    buffer = buffer.slice(newline + 1);
+    if (command.type !== "get_state") continue;
+    const text = "x".repeat(4 * 1024 * 1024 + 123) + String.fromCharCode(8232);
+    const big = send({ type: "message_end", message: { role: "user", content: text, timestamp: 1000 } });
+    const rest = send({ type: "queue_update", steering: ["a"], followUp: [] })
+      + send({ type: "queue_update", steering: ["b"], followUp: [] }).replace("\\n", "\\r\\n")
+      + send({ type: "response", command: command.type, id: command.id, success: true, data: {} });
+    const all = big + rest;
+    for (let i = 0; i < all.length; i += 4096) process.stdout.write(all.slice(i, i + 4096));
+  }
+});
+`, { mode: 0o755 });
+  const events: JsonAgentSessionEvent[] = [];
+  const path = process.env.PATH;
+  let pi: PiProcess;
+  try {
+    process.env.PATH = dir;
+    pi = new PiProcess(dir, [], (event) => events.push(event), () => {});
+  } finally {
+    if (path === undefined) delete process.env.PATH;
+    else process.env.PATH = path;
+  }
+  t.after(async () => {
+    await pi.stop();
+    await rm(dir, { recursive: true, force: true });
+  });
+  await pi.send({ type: "get_state" });
+  assert.equal(events.length, 3);
+  const [big, first, second] = events;
+  assert.ok(big.type === "message_end" && big.message.role === "user");
+  assert.equal(big.message.content, "x".repeat(4 * 1024 * 1024 + 123) + "\u2028");
+  assert.deepEqual(first, { type: "queue_update", steering: ["a"], followUp: [] });
+  assert.deepEqual(second, { type: "queue_update", steering: ["b"], followUp: [] });
+});
