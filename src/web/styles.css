@@ -1996,12 +1996,13 @@ textarea::placeholder {
     padding: 10px;
   }
 
-  .session-toggle + .session-open {
-    padding-left: 4px;
-  }
-
   .session-toggle {
     width: 32px;
+  }
+
+  /* The guide line stays under the center of the wider chevron. */
+  .session-group {
+    margin-left: 19px;
   }
 
   .message-actions {
