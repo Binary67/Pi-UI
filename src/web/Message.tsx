@@ -19,7 +19,7 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import { type ReactNode, useRef, useState } from "react";
+import { memo, type ReactNode, useRef, useState } from "react";
 import Markdown, { type Components } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
@@ -127,7 +127,8 @@ function CodeBlock({ language, children }: { language?: string; children: ReactN
   );
 }
 
-function MarkdownText({ text }: { text: string }) {
+/** Memoized, so a streamed update does not parse and highlight the unchanged messages again. */
+const MarkdownText = memo(function MarkdownText({ text }: { text: string }) {
   return (
     <div className="markdown">
       <Markdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS} components={MARKDOWN_COMPONENTS}>
@@ -135,7 +136,7 @@ function MarkdownText({ text }: { text: string }) {
       </Markdown>
     </div>
   );
-}
+});
 
 function ThinkingBlock({ text, active }: { text: string; active: boolean }) {
   const [open, setOpen] = useState(false);
@@ -180,12 +181,15 @@ function summarize(args: Record<string, unknown>): string {
   return typeof value === "string" ? value : "";
 }
 
-/** Pi's display diff. Each line is a sign (`+`, `-`, or space), a padded line number, and the text. */
+/**
+ * Pi's display diff. Each line is a sign (`+`, `-`, or space), a padded line number, and the text. A line in another
+ * format shows as plain text.
+ */
 function DiffView({ diff }: { diff: string }) {
   return (
     <pre className="diff">
       {diff.split("\n").map((line, index) => {
-        const [, sign, number, text] = /^([+\- ])( *\d*) (.*)$/.exec(line)!;
+        const [, sign = "", number = "", text = line] = /^([+\- ])( *\d*) (.*)$/s.exec(line) ?? [];
         return (
           <div key={index} className={`diff-line${sign === "+" ? " add" : sign === "-" ? " del" : ""}`}>
             <span className="diff-num">{number}</span>
