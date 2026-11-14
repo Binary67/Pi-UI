@@ -146,15 +146,15 @@ open the menu without the names, the browser asks for this permission. The
 microphone turns on for a moment and then off.
 
 When the microphone gives no sound at all, the chat shows an error and does not
-send the recording. There are 2 known causes:
+send the recording. The known cause is that the browser has no macOS access to
+the microphone. Open macOS System Settings → Privacy & Security → Microphone,
+and turn on the browser. An app gets into this list only through the macOS
+prompt. To make macOS ask Safari again, run
+`tccutil reset Microphone com.apple.Safari` and restart Safari.
 
-- The browser has no access to the microphone. Open macOS System Settings →
-  Privacy & Security → Microphone, and turn on the browser. An app gets into
-  this list only through the macOS prompt. To make macOS ask Safari again, run
-  `tccutil reset Microphone com.apple.Safari` and restart Safari.
-- In Safari, a Bluetooth microphone gives silence while the sound output is on
-  a different Bluetooth device. Set the sound output to the built-in speakers or
-  a wired output, or use one Bluetooth device for both.
+Voice input records without echo cancellation. The microphone and the sound
+output can be different devices, such as two Bluetooth devices. Use headphones,
+so that the microphone does not record sound from the speakers.
 
 Put the deployment in `.env`:
 
