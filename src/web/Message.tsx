@@ -25,6 +25,7 @@ import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 import type { AgentMessage, AssistantMessage } from "../shared/chat-state.ts";
 import type { PromptImage } from "../shared/protocol.ts";
+import { ImageViewer } from "./ImageViewer.tsx";
 
 type ToolCall = Extract<AssistantMessage["content"][number], { type: "toolCall" }>;
 type ToolResult = Extract<AgentMessage, { role: "toolResult" }>;
@@ -260,6 +261,23 @@ function CopyAction({ text }: { text: string }) {
   );
 }
 
+/** The image thumbnails of a user message. A click opens the image at full size. */
+function UserImages({ images }: { images: PromptImage[] }) {
+  const [viewing, setViewing] = useState<number | null>(null);
+  return (
+    <>
+      <div className="user-images">
+        {images.map((image, index) => (
+          <button key={index} onClick={() => setViewing(index)} aria-label="View image">
+            <img src={`data:${image.mimeType};base64,${image.data}`} alt="" />
+          </button>
+        ))}
+      </div>
+      {viewing !== null && <ImageViewer images={images} start={viewing} onClose={() => setViewing(null)} />}
+    </>
+  );
+}
+
 type MessageViewProps = {
   message: AgentMessage;
   results: ToolResults;
@@ -283,13 +301,7 @@ export function MessageView({ message, results, running, streaming, onFork }: Me
         : message.content.flatMap((block) => (block.type === "image" ? [block] : []));
     return (
       <div className="message user">
-        {images.length > 0 && (
-          <div className="user-images">
-            {images.map((image, index) => (
-              <img key={index} src={`data:${image.mimeType};base64,${image.data}`} alt="" />
-            ))}
-          </div>
-        )}
+        {images.length > 0 && <UserImages images={images} />}
         {text && <div className="user-text">{text}</div>}
         <div className="message-actions">
           {text && <CopyAction text={text} />}
