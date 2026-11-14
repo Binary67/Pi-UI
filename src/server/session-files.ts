@@ -81,6 +81,21 @@ export async function listSessions(files: string[]): Promise<SessionListing[]> {
   return sessions.filter((session) => session !== null).sort((a, b) => b.modified - a.modified);
 }
 
+/**
+ * Change the working folder in the header of the session in `file` to `cwd`. Pi runs a session in its working folder,
+ * and cannot open it when the folder is gone. No Pi process may run the session. A file that Pi did not save stays absent.
+ */
+export async function moveSession(file: string, cwd: string): Promise<void> {
+  const text = await readFile(file, "utf8").catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return undefined;
+    throw error;
+  });
+  if (text === undefined) return;
+  const end = text.indexOf("\n");
+  const header = JSON.parse(text.slice(0, end)) as SessionHeader;
+  await writeFile(file, JSON.stringify({ ...header, cwd }) + text.slice(end));
+}
+
 /** Create a separate fork before a user message. Never write to the source, which may still be running. */
 export async function forkSession(file: string, timestamp: number): Promise<string | undefined> {
   const { header, entries } = await readSession(file);

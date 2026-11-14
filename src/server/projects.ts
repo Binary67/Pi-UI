@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -6,18 +7,35 @@ import { listSessions } from "./session-files.ts";
 
 const FILE = join(homedir(), ".pi-ui", "projects.json");
 
-/** A task of an orchestrator. `additions` are the instructions that the orchestrator added after it queued the task. */
+/**
+ * A task of an orchestrator: its contract, and the git worktree where its subagent works. `additions` are the
+ * instructions that the orchestrator sent to the subagent.
+ */
 export type Task = Omit<TaskSummary, "activity"> & {
-  prompt: string;
+  goal: string;
+  /** The owned files: the only files that the subagent may change. A path that ends with `/` covers its folder. */
+  files: string[];
+  inputs: string;
+  outputs: string;
+  criteria: string;
+  /** The shared contract of the tasks that started together. */
+  contract: string;
+  /** The shell command that prepares the worktree before the subagent starts. */
+  setup?: string;
   additions: string[];
+  /** The worktree folder and its branch. Both exist while the task is running or in review. */
+  worktree: string;
+  branch: string;
+  /** The commit that the branch starts from. */
+  base: string;
   /** When the last run of the task started. */
   started?: number;
   /** True when the user sent a message to the subagent after the last task update. */
   direct?: boolean;
 };
 
-/** The orchestrator session of a project, and its tasks in queue order. */
-export type Orchestrator = { file: string; tasks: Task[] };
+/** The orchestrator session of a project, and its tasks in start order. `id` names its worktrees and branches. */
+export type Orchestrator = { id: string; file: string; tasks: Task[] };
 
 /** A project folder, the session files that the UI keeps for it, and the files with a run that ended unseen. */
 type StoredProject = { path: string; sessions: string[]; unread: string[]; orchestrator?: Orchestrator };
@@ -78,12 +96,27 @@ export function getOrchestrator(path: string): Orchestrator | undefined {
   return projects.find((project) => project.path === path)?.orchestrator;
 }
 
-/** Make the session in `file` the orchestrator of the project in `path`. The project keeps its tasks. */
+/** Make the new session in `file` the orchestrator of the project in `path`. The project has no orchestrator yet. */
 export function setOrchestrator(path: string, file: string): void {
   const project = projects.find((item) => item.path === path);
   if (!project) return;
-  project.orchestrator = { file, tasks: project.orchestrator?.tasks ?? [] };
+  project.orchestrator = { id: randomUUID().slice(0, 8), file, tasks: [] };
   save();
+}
+
+/** Remove the orchestrator of the project in `path`, with the sessions of its tasks. Returns the removed orchestrator. */
+export function removeOrchestrator(path: string): Orchestrator | undefined {
+  const project = projects.find((item) => item.path === path);
+  const orchestrator = project?.orchestrator;
+  if (!project || !orchestrator) return undefined;
+  const files = new Set([orchestrator.file, ...orchestrator.tasks.flatMap((task) => task.file ?? [])]);
+  Object.assign(project, {
+    orchestrator: undefined,
+    sessions: project.sessions.filter((file) => !files.has(file)),
+    unread: project.unread.filter((file) => !files.has(file)),
+  });
+  save();
+  return orchestrator;
 }
 
 /** The project path of the orchestrator in `file`. */

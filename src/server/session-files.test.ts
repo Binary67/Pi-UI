@@ -3,7 +3,7 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
-import { forkSession, listSessions } from "./session-files.ts";
+import { forkSession, listSessions, moveSession } from "./session-files.ts";
 
 async function fixture(t: TestContext): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "pi-ui-sessions-"));
@@ -153,4 +153,19 @@ test("forks retain a compaction's self-reference and fall back to the prior prom
   const records = (await readFile(forked, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
   assert.equal(records[2].firstKeptEntryId, "compact");
   assert.equal(records.at(-1).name, "Fork: First prompt");
+});
+
+test("a moved session gets the new working folder and keeps its entries, and a missing file stays absent", async (t) => {
+  const dir = await fixture(t);
+  const file = await writeSession(dir, "moved", [
+    message("u1", null, { role: "user", content: "Prompt", timestamp: 1000 }),
+  ]);
+  const before = (await readFile(file, "utf8")).split("\n");
+  await moveSession(file, "/projects/app");
+  const after = (await readFile(file, "utf8")).split("\n");
+  assert.deepEqual(JSON.parse(after[0]), { ...JSON.parse(before[0]), cwd: "/projects/app" });
+  assert.deepEqual(after.slice(1), before.slice(1));
+
+  await moveSession(join(dir, "missing.jsonl"), "/projects/app");
+  assert.deepEqual((await readdir(dir)).sort(), ["moved.jsonl"]);
 });

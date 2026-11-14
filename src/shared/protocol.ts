@@ -35,6 +35,11 @@ export type ClientMessage =
   | { type: "start"; cwd: string; file?: string }
   /** Show the orchestrator of the project in `cwd`. A project without an orchestrator gets a new one. */
   | { type: "orchestrator"; cwd: string }
+  /**
+   * Replace the orchestrator of the project in `cwd` with a new one, then show it. The active tasks of the old one are
+   * cancelled, and its sessions leave the sidebar.
+   */
+  | { type: "new_orchestrator"; cwd: string }
   /** Pi uses `streamingBehavior` only during a run. In an idle session, the prompt starts a run. */
   | { type: "prompt"; file: string; text: string; images: PromptImage[]; streamingBehavior: StreamingBehavior }
   /** Clear the queue, then stop the run. The queued text comes back in a `restore` message. */
@@ -63,19 +68,19 @@ export type SessionStatus = "running" | "warm";
 /** The orchestrator session of a project. It is not in `sessions`. */
 export type Project = { path: string; sessions: SessionSummary[]; orchestrator?: { file: string; unread: boolean } };
 
-/** Only one task of an orchestrator at a time is `running` or in `review`. */
-export type TaskStatus = "queued" | "running" | "review" | "done" | "cancelled";
+/** The tasks of an orchestrator run in parallel. A task that is `running` or in `review` has its own git worktree. */
+export type TaskStatus = "running" | "review" | "done" | "cancelled";
 
 /** A task of an orchestrator, as the task board shows it. */
 export type TaskSummary = {
   id: number;
   title: string;
   status: TaskStatus;
-  /** The session file of the subagent. Absent until the task starts. */
+  /** The session file of the subagent. Absent until the setup of the task ends. */
   file?: string;
   /** Why the task is in review, such as an error. */
   note?: string;
-  /** The last tool call of a running task, such as `edit src/app.ts`. */
+  /** The setup command or the last tool call of a running task, such as `edit src/app.ts`. */
   activity?: string;
 };
 
@@ -92,7 +97,7 @@ export type ServerMessage =
   | { type: "projects"; projects: Project[] }
   /** The status of each live session, by session file. A session that is not in the list is cold. */
   | { type: "status"; sessions: Record<string, SessionStatus> }
-  /** The tasks of each orchestrator in queue order, by project path. */
+  /** The tasks of each orchestrator in start order, by project path. */
   | { type: "tasks"; tasks: Record<string, TaskSummary[]> }
   | { type: "folders"; listing: FolderListing }
   | { type: "event"; file: string; event: JsonAgentSessionEvent }

@@ -1,4 +1,4 @@
-import { readdir, stat } from "node:fs/promises";
+import { readdir, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,15 +25,37 @@ import {
   listProjects,
   markRead,
   markUnread,
+  type Orchestrator,
   orchestratorPath,
+  removeOrchestrator,
   removeProject,
   removeSession,
   saveTasks,
   setOrchestrator,
   type Task,
 } from "./projects.ts";
-import { forkSession } from "./session-files.ts";
-import { activity, describeTask, nextTask, taskLine, taskPrompt, updateText } from "./tasks.ts";
+import { forkSession, moveSession } from "./session-files.ts";
+import {
+  activity,
+  type Changes,
+  describeTask,
+  isActive,
+  outside,
+  overlap,
+  taskLine,
+  taskPrompt,
+  updateText,
+} from "./tasks.ts";
+import {
+  addWorktree,
+  changedFiles,
+  checkRepo,
+  commitAll,
+  diffSince,
+  isMerged,
+  removeWorktree,
+  runSetup,
+} from "./worktrees.ts";
 
 const HOST = "127.0.0.1";
 const PORT = 3001;
@@ -58,16 +80,19 @@ const HEARTBEAT_MS = 30 * 1000;
 
 // The Pi extension with the task tools, and the instructions of the orchestrator and its subagents.
 const ORCHESTRATOR_DIR = fileURLToPath(new URL("../orchestrator/", import.meta.url));
-// The orchestrator plans and reviews, and the subagents edit. So the orchestrator has only read tools of its own.
+// The orchestrator plans, reviews, and merges, and the subagents edit. So the orchestrator has no edit tools. It uses
+// bash for git and checks.
 const ORCHESTRATOR_ARGS = [
   "-e",
   join(ORCHESTRATOR_DIR, "extension.ts"),
   "--append-system-prompt",
   join(ORCHESTRATOR_DIR, "orchestrator.md"),
   "--tools",
-  "read,grep,find,ls,queue_tasks,list_tasks,get_task,message_task,finish_task,cancel_task",
+  "read,grep,find,ls,bash,start_tasks,list_tasks,get_task,message_task,finish_task,cancel_task",
 ];
 const SUBAGENT_ARGS = ["--append-system-prompt", join(ORCHESTRATOR_DIR, "subagent.md")];
+// The worktrees of the tasks, in a folder for each orchestrator: `<orchestrator id>/task-<task id>`.
+const WORKTREES_DIR = join(homedir(), ".pi-ui", "worktrees");
 
 type Session = { cwd: string; file: string; pi: PiProcess; state: ChatState; info: SessionInfo; timer?: NodeJS.Timeout };
 
@@ -108,9 +133,11 @@ function statusMessage(): ServerMessage {
   };
 }
 
-function taskSummary({ id, title, status, file, note }: Task): TaskSummary {
+function taskSummary({ id, title, status, file, note, setup }: Task): TaskSummary {
   const state = status === "running" && file ? sessions.get(file)?.state : undefined;
-  return { id, title, status, file, note, activity: state && activity(state) };
+  // A running task without a session runs its setup command.
+  const now = status === "running" && !file ? setup && `setup: ${setup}` : state && activity(state);
+  return { id, title, status, file, note, activity: now || undefined };
 }
 
 function tasksMessage(): ServerMessage {
@@ -149,14 +176,15 @@ async function refresh(session: Session): Promise<void> {
 
 /**
  * Start a Pi process for the session in `file`, or for a new session in `cwd`, with the extra Pi options `args`. The
- * session is not live yet.
+ * session is not live yet. A new session works in the folder `dir`, such as the worktree of a task. A saved session
+ * works in the folder in its file.
  */
-async function launch(cwd: string, file?: string, args: string[] = []): Promise<Session> {
+async function launch(cwd: string, file?: string, args: string[] = [], dir = cwd): Promise<Session> {
   // Two Pi processes must not write to the same file.
   if (file) await stopping.get(file);
   let session: Session | undefined;
   const pi = new PiProcess(
-    cwd,
+    dir,
     [...(file ? ["--session", file] : []), ...args],
     (event) => {
       if (!session) return;
@@ -328,12 +356,25 @@ async function start(socket: WebSocket, folder: string, file?: string): Promise<
   prepareSpare(cwd);
 }
 
-/** Show the orchestrator of the project in `folder` on the page of `socket`. A project without one gets a new one. */
-async function startOrchestrator(socket: WebSocket, folder: string): Promise<void> {
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Show the orchestrator of the project in `folder` on the page of `socket`. A project without one gets a new one. With
+ * `fresh`, a new orchestrator replaces the old one.
+ */
+async function startOrchestrator(socket: WebSocket, folder: string, fresh: boolean): Promise<void> {
   const cwd = toPath(folder);
   const info = await stat(cwd).catch(() => undefined);
   if (!info?.isDirectory()) throw new Error(`Folder not found: ${folder}`);
   if (addProject(cwd)) await broadcastProjects();
+  if (fresh) {
+    // This page waits for the new orchestrator. It does not go back to the start screen with the other pages.
+    views.delete(socket);
+    send(socket, { type: "starting" });
+    await dropOrchestrator(cwd);
+  }
   let file = getOrchestrator(cwd)?.file;
   if (!file) {
     send(socket, { type: "starting" });
@@ -342,6 +383,49 @@ async function startOrchestrator(socket: WebSocket, folder: string): Promise<voi
     await broadcastProjects();
   }
   return start(socket, cwd, file);
+}
+
+/**
+ * Remove the orchestrator of the project in `path` from the sidebar, with the sessions of its tasks. Its active tasks are
+ * cancelled: their subagents stop, and their worktrees and branches are deleted. The session files stay.
+ */
+async function dropOrchestrator(path: string): Promise<void> {
+  // From now on, no task tool, task update, or prompt reaches the orchestrator or its tasks.
+  const orchestrator = removeOrchestrator(path);
+  if (!orchestrator) return;
+  const files = [orchestrator.file, ...orchestrator.tasks.flatMap((task) => task.file ?? [])];
+  for (const [socket, viewed] of views) {
+    if (!files.includes(viewed)) continue;
+    views.delete(socket);
+    send(socket, { type: "snapshot", session: null });
+  }
+  broadcast(tasksMessage());
+  await broadcastProjects();
+  const active = orchestrator.tasks.filter(isActive);
+  for (const task of active) task.status = "cancelled";
+  // The project folder can be gone. Then the cleanup of a task fails, but the orchestrator still goes.
+  const results = await Promise.allSettled([stopSession(orchestrator.file), ...active.map((task) => closeTask(path, task))]);
+  for (const result of results) {
+    if (result.status === "rejected") console.error("Could not clean up the orchestrator:", result.reason);
+  }
+  await rm(join(WORKTREES_DIR, orchestrator.id), { recursive: true, force: true });
+}
+
+/** Stop the Pi process of the session in `file`. A run stops first. Resolves when the process has exited. */
+async function stopSession(file: string): Promise<void> {
+  const session = sessions.get(file) ?? (await opening.get(file)?.catch(() => undefined));
+  if (session && sessions.get(file) === session) {
+    // Out of the map, the session does not report its exit to the pages.
+    clearTimeout(session.timer);
+    sessions.delete(file);
+    broadcast(statusMessage());
+    if (session.state.running) {
+      await session.pi.send({ type: "clear_queue" });
+      await session.pi.send({ type: "abort" });
+    }
+    stopping.set(file, session.pi.stop().finally(() => stopping.delete(file)));
+  }
+  await stopping.get(file);
 }
 
 /** Follow a subagent run: the status of its task, its activity on the task board, and the update for the orchestrator. */
@@ -363,22 +447,39 @@ function followTask(session: Session, event: JsonAgentSessionEvent): void {
   broadcast(tasksMessage());
 }
 
-/** Move a running task to review, and send the task update to the orchestrator. */
+/** Move a running task to review. Then commit its changes, and send the task update to the orchestrator. */
 function toReview(path: string, task: Task, note: string | undefined, state?: ChatState): void {
   Object.assign(task, { status: "review", note });
-  const text = updateText(task, state);
+  // The update describes the task as it is now, also when the task changes during the commit.
+  const update = { ...task };
   task.direct = false;
   saveTasks();
-  notify(path, task, text).catch((error: unknown) => console.error(`Could not send the update of task ${task.id}:`, error));
+  report(path, task, update, state).catch((error: unknown) =>
+    console.error(`Could not send the update of task ${task.id}:`, error),
+  );
 }
 
-/** Send a task update to the orchestrator of the project in `path`. The update starts a turn of the orchestrator. */
-async function notify(path: string, task: Task, text: string): Promise<void> {
-  // The project can be gone.
+/** Commit the changes of `task`, so that its branch is complete for the review and the merge. Then send `update`. */
+async function report(path: string, task: Task, update: Task, state?: ChatState): Promise<void> {
+  await commitAll(task.worktree, task.title).catch((error: unknown) => {
+    update.note = [update.note, `The server could not commit the changes: ${errorText(error)}`].filter(Boolean).join(" ");
+  });
+  await notify(path, task, update, updateText(update, await taskChanges(task), state));
+}
+
+/** The git changes of `task` in its worktree. */
+async function taskChanges(task: Task): Promise<Changes> {
+  const [files, diff] = await Promise.all([changedFiles(task.worktree, task.base), diffSince(task.worktree, task.base)]);
+  return { files, outside: outside(task, files), diff };
+}
+
+/** Send the task update `text` to the orchestrator of `task`. The update starts a turn of the orchestrator. */
+async function notify(path: string, task: Task, update: Task, text: string): Promise<void> {
+  // The project or the orchestrator of the task can be gone.
   const orchestrator = getOrchestrator(path);
-  if (!orchestrator) return;
+  if (!orchestrator?.tasks.includes(task)) return;
   const session = await open(path, orchestrator.file);
-  const details = { id: task.id, title: task.title, status: task.status, note: task.note };
+  const details = { id: update.id, title: update.title, status: update.status, note: update.note };
   // Pi runs an extension command at once, also during a run. The extension delivers the update when the run ends.
   await session.pi.send({
     type: "prompt",
@@ -388,51 +489,85 @@ async function notify(path: string, task: Task, text: string): Promise<void> {
   release(session.file);
 }
 
-/** Start the next queued task of the project in `path`, unless a task is running or in review. */
-function advance(path: string): Task | undefined {
-  const task = nextTask(getOrchestrator(path)!.tasks);
-  if (task) void startTask(path, task);
-  return task;
+// The starts of tasks in progress: the setup, and the start of the subagent.
+const launches = new Map<Task, Promise<void>>();
+
+/** Start `task` in the background. */
+function startTask(path: string, task: Task): void {
+  launches.set(task, launchTask(path, task).finally(() => launches.delete(task)));
 }
 
-/** Start a new subagent session for `task`, and send it the task prompt. */
-async function startTask(path: string, task: Task): Promise<void> {
+/** Run the setup command of `task` in its worktree. Then start a new subagent session there, with the task prompt. */
+async function launchTask(path: string, task: Task): Promise<void> {
   Object.assign(task, { status: "running", started: Date.now(), note: undefined });
   saveTasks();
+  broadcast(tasksMessage());
   try {
-    const session = register(await launch(path, undefined, [...SUBAGENT_ARGS, "--name", task.title]));
+    if (task.setup) await runSetup(task.worktree, task.setup);
+    // The task can be cancelled during its setup.
+    if (task.status !== "running") return;
+    const session = register(await launch(path, undefined, [...SUBAGENT_ARGS, "--name", task.title], task.worktree));
     task.file = session.file;
     saveTasks();
     await session.pi.send({ type: "prompt", message: taskPrompt(task) });
   } catch (error) {
     // When the Pi process exited, its exit handler already moved the task to review.
-    if (task.status === "running") {
-      toReview(path, task, `The task could not start: ${error instanceof Error ? error.message : String(error)}`);
-    }
+    if (task.status === "running") toReview(path, task, `The task could not start: ${errorText(error)}`);
   }
   broadcast(tasksMessage());
 }
 
+/** Stop the subagent of `task`, then delete its worktree and branch. The session moves to the project folder. */
+async function closeTask(path: string, task: Task): Promise<void> {
+  // The worktree stays until the setup and the subagent have ended.
+  await launches.get(task);
+  if (task.file) await stopSession(task.file);
+  await removeWorktree(path, task.worktree, task.branch);
+  if (task.file) await moveSession(task.file, path);
+}
+
+type TaskSpec = Pick<Task, "title" | "goal" | "files" | "inputs" | "outputs" | "criteria">;
 /** The parameters of the task tools. Pi checks them against the schemas of the extension, so each tool gets its own. */
-type ToolParams = { tasks: { title: string; prompt: string }[]; id: number; text: string; mode: StreamingBehavior };
+type ToolParams = {
+  contract: string;
+  setup?: string;
+  tasks: TaskSpec[];
+  id: number;
+  text: string;
+  mode: StreamingBehavior;
+};
 
 /** Run the task tool `name` for the orchestrator in `file`. Returns the text for the model. */
 async function runTool(file: string, name: string, params: unknown): Promise<string> {
   const path = orchestratorPath(file);
   if (!path) throw new Error("Only the orchestrator of a project can use the task tools.");
-  const result = await taskTool(path, getOrchestrator(path)!.tasks, name, params as ToolParams);
-  saveTasks();
-  broadcast(tasksMessage());
-  return result;
+  try {
+    return await taskTool(path, getOrchestrator(path)!, name, params as ToolParams);
+  } finally {
+    saveTasks();
+    broadcast(tasksMessage());
+  }
 }
 
-async function taskTool(path: string, tasks: Task[], name: string, params: ToolParams): Promise<string> {
-  if (name === "queue_tasks") {
-    let id = Math.max(0, ...tasks.map((task) => task.id));
-    const added = params.tasks.map(({ title, prompt }): Task => ({ id: ++id, title, prompt, status: "queued", additions: [] }));
-    tasks.push(...added);
-    const started = advance(path);
-    return `Queued: ${added.map((task) => `${task.id}. ${task.title}`).join(", ")}.${started ? ` Task ${started.id} started.` : ""}`;
+async function taskTool(path: string, orchestrator: Orchestrator, name: string, params: ToolParams): Promise<string> {
+  const { tasks } = orchestrator;
+  if (name === "start_tasks") {
+    await checkRepo(path);
+    const conflict = overlap([...tasks.filter(isActive), ...params.tasks]);
+    if (conflict) throw new Error(`The owned files overlap: ${conflict}. A file can belong to only one active task.`);
+    const started: Task[] = [];
+    for (const spec of params.tasks) {
+      const id = Math.max(0, ...tasks.map((task) => task.id)) + 1;
+      const worktree = join(WORKTREES_DIR, orchestrator.id, `task-${id}`);
+      const branch = `pi-ui/${orchestrator.id}/task-${id}`;
+      const base = await addWorktree(path, worktree, branch);
+      const { contract, setup } = params;
+      const task: Task = { ...spec, id, status: "running", contract, setup, additions: [], worktree, branch, base };
+      tasks.push(task);
+      started.push(task);
+      startTask(path, task);
+    }
+    return `Started: ${started.map((task) => `${task.id}. ${task.title}`).join(", ")}. An update arrives when the run of each task ends.`;
   }
   if (name === "list_tasks") {
     const lines = tasks.map((task) => {
@@ -445,21 +580,20 @@ async function taskTool(path: string, tasks: Task[], name: string, params: ToolP
   if (!task) throw new Error(`Task ${params.id} does not exist.`);
   switch (name) {
     case "get_task": {
-      if (!task.file) return describeTask(task);
+      const changes = isActive(task) ? await taskChanges(task) : undefined;
+      if (!task.file) return describeTask(task, undefined, undefined, changes);
       // A session that is not live opens, so that the view has its messages.
       const session = await open(path, task.file);
       release(session.file);
-      return describeTask(task, session.state, session.info.stats.cost);
+      return describeTask(task, session.state, session.info.stats.cost, changes);
     }
     case "message_task": {
-      if (task.status === "done" || task.status === "cancelled") {
-        throw new Error(`Task ${task.id} is ${task.status}. Propose a new task instead.`);
-      }
+      if (!isActive(task)) throw new Error(`Task ${task.id} is ${task.status}. Propose a new task instead.`);
       task.additions.push(params.text);
-      if (task.status === "queued") return `Added to the prompt of task ${task.id}. Its subagent gets it when the task starts.`;
-      // A task that could not start has no session. It starts again, with the added instructions.
+      // A task without a session runs its setup now, or could not start.
       if (!task.file) {
-        void startTask(path, task);
+        if (task.status === "running") return `Added to the prompt of task ${task.id}. Its subagent gets it after the setup.`;
+        startTask(path, task);
         return `Task ${task.id} starts again, with the added instructions.`;
       }
       if (task.status === "review") Object.assign(task, { status: "running", started: Date.now(), note: undefined });
@@ -469,20 +603,22 @@ async function taskTool(path: string, tasks: Task[], name: string, params: ToolP
     }
     case "finish_task": {
       if (task.status !== "review") throw new Error(`Task ${task.id} is ${task.status}. Only a task in review can finish.`);
+      // Changes after the last commit, such as from a server restart, need a review and a merge too.
+      if (await commitAll(task.worktree, task.title)) {
+        throw new Error(`Task ${task.id} had uncommitted changes. They are now on ${task.branch}. Review and merge them first.`);
+      }
+      if (!(await isMerged(path, task.branch))) {
+        throw new Error(`${task.branch} is not merged. Merge it into the current branch of the project first.`);
+      }
       Object.assign(task, { status: "done", note: undefined });
-      const started = advance(path);
-      return `Task ${task.id} is done. ${started ? `Task ${started.id} started.` : "No task is queued."}`;
+      await closeTask(path, task);
+      return `Task ${task.id} is done. Its worktree and branch are deleted.`;
     }
     case "cancel_task": {
-      if (task.status === "done" || task.status === "cancelled") throw new Error(`Task ${task.id} is already ${task.status}.`);
-      const session = task.status === "running" && task.file ? sessions.get(task.file) : undefined;
+      if (!isActive(task)) throw new Error(`Task ${task.id} is already ${task.status}.`);
       task.status = "cancelled";
-      if (session) {
-        await session.pi.send({ type: "clear_queue" });
-        await session.pi.send({ type: "abort" });
-      }
-      const started = advance(path);
-      return `Task ${task.id} is cancelled. ${started ? `Task ${started.id} started.` : "No task started."}`;
+      await closeTask(path, task);
+      return `Task ${task.id} is cancelled. Its worktree and branch are deleted.`;
     }
   }
   throw new Error(`Unknown task tool: ${name}`);
@@ -535,16 +671,19 @@ async function handle(socket: WebSocket, message: ClientMessage): Promise<void> 
     case "transcribe":
       return send(socket, { type: "transcript", text: await transcribe(message.audio, message.mimeType) });
     case "start":
-    case "orchestrator": {
+    case "orchestrator":
+    case "new_orchestrator": {
       const run = (starting.get(socket) ?? Promise.resolve()).then(() =>
-        message.type === "start" ? start(socket, message.cwd, message.file) : startOrchestrator(socket, message.cwd),
+        message.type === "start"
+          ? start(socket, message.cwd, message.file)
+          : startOrchestrator(socket, message.cwd, message.type === "new_orchestrator"),
       );
       starting.set(socket, run.catch(() => {}));
       return run;
     }
     case "remove_project":
+      await dropOrchestrator(message.path);
       removeProject(message.path);
-      broadcast(tasksMessage());
       return broadcastProjects();
     case "remove_session":
       removeSession(message.file);
@@ -557,13 +696,17 @@ async function handle(socket: WebSocket, message: ClientMessage): Promise<void> 
       release(message.file);
       return broadcastProjects();
   }
+  const task = findTask(message.file)?.task;
+  // A done or cancelled task has no worktree. Its subagent would change the project folder directly.
+  if (message.type === "prompt" && task && !isActive(task)) {
+    throw new Error(`This task is ${task.status}. Ask the orchestrator for a new task.`);
+  }
   const session = sessions.get(message.file);
   if (!session) throw new Error("Start a session first.");
   switch (message.type) {
     case "prompt": {
       // The next task update tells the orchestrator that the user talked to the subagent directly.
-      const task = findTask(message.file)?.task;
-      if (task?.status === "running" || task?.status === "review") {
+      if (task) {
         task.direct = true;
         saveTasks();
       }

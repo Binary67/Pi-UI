@@ -1757,7 +1757,7 @@ textarea::placeholder {
   box-shadow: var(--shadow);
 }
 
-/* A queued task has no session to open yet. */
+/* A task in setup has no session to open yet. */
 .card:disabled {
   opacity: 1;
 }

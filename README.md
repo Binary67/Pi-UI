@@ -32,15 +32,27 @@ from the same installation. Pi upgrades may require updating this integration.
 
 ## Orchestrator
 
-**Orchestrator** in the sidebar opens the orchestrator of a project. Each project has one. You talk to the
-orchestrator. It discusses a plan with you, and after you agree, it puts the tasks in a queue. Subagents do the tasks
-one at a time. Each subagent is a normal session of the project, so you can open it from the sidebar and type in it.
+An orchestrator solves one problem of a project with subagents. **Orchestrator** in the sidebar opens the orchestrator
+of a project, or starts one. For the next problem, **New orchestrator** in the header starts a new one with a fresh
+context. The old orchestrator and the sessions of its tasks then leave the sidebar. Their session files stay.
 
-- The task board on the right shows the tasks in queue order. A click on a card opens the session of its task.
-- When a subagent run ends, its task goes to review, and the orchestrator gets a task update. The orchestrator then
-  sends corrections or accepts the task. The next task starts only after the orchestrator accepts or cancels the
-  current one.
-- The orchestrator has only read tools and its task tools. It does not edit files.
+1. You discuss the problem with the orchestrator. It splits the problem into tasks, and writes a contract: a shared
+   contract for all tasks, and for each task the goal, the owned files, the inputs, the outputs, and the acceptance
+   criteria. A file belongs to only one active task.
+2. After you agree, the orchestrator starts the tasks in parallel. Each task gets a new git worktree in
+   `~/.pi-ui/worktrees/` and a new branch from the last commit. The server runs the setup command of the plan in the
+   worktree, such as `npm ci`, and then starts the subagent there.
+3. When a subagent run ends, the server commits the changes on the task branch. The task goes to review, and the
+   orchestrator gets a task update with the changed files. The update also lists the changed files outside the owned
+   files.
+4. The orchestrator reviews the branch, and sends corrections or merges it with `git`. After the merge, it accepts the
+   task. The server then stops the subagent and deletes the worktree and the branch. It also deletes them when the
+   orchestrator cancels a task, or when you start a new orchestrator.
+
+- The project must be the top folder of a git repository, with at least one commit and no uncommitted changes.
+- The task board on the right shows the tasks. A click on a card opens the session of its task. You can type in the
+  session of a running task or a task in review. A done or cancelled task accepts no prompts.
+- The orchestrator has read tools, `bash` for git and checks, and its task tools. It does not edit files.
 
 The orchestrator loads the Pi extension in `src/orchestrator/extension.ts`, with the instructions in
 `src/orchestrator/orchestrator.md`. Subagents get the instructions in `src/orchestrator/subagent.md`. They tell a
@@ -102,8 +114,8 @@ microphone permission.
 
 ```bash
 npm run typecheck
-node --test src/server/pi-process.test.ts src/server/session-files.test.ts src/server/tasks.test.ts
+node --test src/server/pi-process.test.ts src/server/session-files.test.ts src/server/tasks.test.ts src/server/worktrees.test.ts
 ```
 
-The focused tests use temporary files and a fake Pi executable, not real sessions
-or model requests.
+The focused tests use temporary files, temporary git repositories, and a fake Pi
+executable, not real sessions or model requests.

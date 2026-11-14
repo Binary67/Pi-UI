@@ -27,6 +27,7 @@ type ExtensionAPI = {
 };
 
 const ID = { type: "integer", description: "The task id." };
+const TEXT = (description: string) => ({ type: "string", description });
 
 function object(properties: object, required: string[]): object {
   return { type: "object", properties, required, additionalProperties: false };
@@ -34,36 +35,49 @@ function object(properties: object, required: string[]): object {
 
 const TOOLS = [
   {
-    name: "queue_tasks",
-    label: "Queue tasks",
-    promptSnippet: "Add tasks to the queue of subagents",
+    name: "start_tasks",
+    label: "Start tasks",
+    promptSnippet: "Start tasks in parallel, each with its own subagent and git worktree",
     description:
-      "Add tasks to the end of the queue. Subagents do the tasks one at a time, in queue order. The first new task starts at once when no task is running or in review. A subagent does not see this conversation, so each prompt must stand alone.",
+      "Start tasks in parallel. Each task gets a new git worktree and branch from the last commit of the project, and its own subagent. The project must be the top folder of a git repository without uncommitted changes. The owned files of active tasks must not overlap. A subagent does not see this conversation, so the contract and each task must stand alone.",
     parameters: object(
       {
+        contract: TEXT(
+          "The shared contract: the interfaces, types, names, file layout, and decisions that the tasks share. Each subagent gets it.",
+        ),
+        setup: TEXT(
+          "A shell command that prepares each new worktree before its subagent starts, such as `npm ci`. A worktree has no ignored files, such as dependencies or .env. Leave it out when the subagents need no setup.",
+        ),
         tasks: {
           type: "array",
           minItems: 1,
           items: object(
             {
-              title: { type: "string", description: "A short title for the task board and the session list." },
-              prompt: {
-                type: "string",
-                description: "The complete instructions: the goal, the relevant files, the constraints, and the acceptance criteria.",
+              title: TEXT("A short title for the task board and the session list."),
+              goal: TEXT("What the task must do."),
+              files: {
+                type: "array",
+                minItems: 1,
+                items: { type: "string" },
+                description:
+                  "The owned files: the only files that the subagent may change, relative to the project folder, without ./. A path that ends with / covers its folder.",
               },
+              inputs: TEXT("What the task can rely on: the existing code, and the parts of the contract that other tasks provide."),
+              outputs: TEXT("What the task must provide: functions, types, endpoints, or behavior, with exact names and signatures."),
+              criteria: TEXT("The acceptance criteria, with the checks that the subagent must run."),
             },
-            ["title", "prompt"],
+            ["title", "goal", "files", "inputs", "outputs", "criteria"],
           ),
         },
       },
-      ["tasks"],
+      ["contract", "tasks"],
     ),
   },
   {
     name: "list_tasks",
     label: "List tasks",
     promptSnippet: "List the tasks with their status",
-    description: "List all tasks in queue order, with status, note, cost, and the current activity of the running task.",
+    description: "List all tasks in start order, with status, note, cost, and the current activity of each running task.",
     parameters: object({}, []),
   },
   {
@@ -71,7 +85,7 @@ const TOOLS = [
     label: "Get task",
     promptSnippet: "Show the progress or the result of one task",
     description:
-      "Show one task: status, run time, prompt, added instructions, current tool, recent tool calls, changed files and diffs, the latest text of the subagent, and cost. Use it to check progress and to review a task.",
+      "Show one task: status, run time, worktree, branch, base commit, contract, added instructions, current tool, recent tool calls, changed files, changed files outside the owned files, the diff since the base commit, the latest text of the subagent, and cost. Use it to check progress and to review a task.",
     parameters: object({ id: ID }, ["id"]),
   },
   {
@@ -79,7 +93,7 @@ const TOOLS = [
     label: "Message task",
     promptSnippet: "Send instructions to the subagent of a task",
     description:
-      "Send instructions to the subagent of a task. For a running task, mode steer delivers the text after its current tool calls, and mode followUp delivers it when its run ends. For a task in review, the text starts a new run in the same session. For a queued task, the text is added to its prompt. Done and cancelled tasks cannot get messages.",
+      "Send instructions to the subagent of a running task or a task in review. For a running task, mode steer delivers the text after its current tool calls, and mode followUp delivers it when its run ends. For a task in review, the text starts a new run in the same session and worktree. During the setup, or for a task that could not start, the text is added to its prompt, and a task that could not start starts again. Done and cancelled tasks cannot get messages.",
     parameters: object(
       {
         id: ID,
@@ -96,15 +110,17 @@ const TOOLS = [
   {
     name: "finish_task",
     label: "Finish task",
-    promptSnippet: "Accept a task in review",
-    description: "Accept a task in review and mark it done. The next queued task then starts.",
+    promptSnippet: "Accept a merged task in review",
+    description:
+      "Accept a task in review after you merged its branch into the current branch of the project. Pi UI checks the merge, stops the subagent, deletes the worktree and the branch, and marks the task done.",
     parameters: object({ id: ID }, ["id"]),
   },
   {
     name: "cancel_task",
     label: "Cancel task",
     promptSnippet: "Cancel a task",
-    description: "Cancel a task that is queued, running, or in review. A running subagent stops. The next queued task then starts.",
+    description:
+      "Cancel a running task or a task in review. Its subagent stops, and its worktree and branch are deleted without a merge.",
     parameters: object({ id: ID }, ["id"]),
   },
 ];

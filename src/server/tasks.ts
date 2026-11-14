@@ -13,15 +13,50 @@ const SUMMARY_KEYS = ["command", "path", "pattern", "url", "query"];
 
 type ToolCall = Extract<AssistantMessage["content"][number], { type: "toolCall" }>;
 
-/** The queued task that starts next. There is none while a task is running or in review. */
-export function nextTask(tasks: Task[]): Task | undefined {
-  if (tasks.some((task) => task.status === "running" || task.status === "review")) return undefined;
-  return tasks.find((task) => task.status === "queued");
+/** The git changes of a task since its base commit. `outside` has the changed files outside the owned files. */
+export type Changes = { files: string[]; outside: string[]; diff: string };
+
+/** True while the task has a worktree: it is running or in review. */
+export function isActive(task: Task): boolean {
+  return task.status === "running" || task.status === "review";
 }
 
-/** The first prompt of a subagent: the task prompt, with the instructions that the orchestrator added to it in the queue. */
+/** True when the owned path `owner` covers `path`. An owned path that ends with `/` covers its folder. */
+export function covers(owner: string, path: string): boolean {
+  return owner === path || (owner.endsWith("/") && path.startsWith(owner));
+}
+
+/** The first owned paths that two of `tasks` share, as text. Undefined when no owned files overlap. */
+export function overlap(tasks: Pick<Task, "title" | "files">[]): string | undefined {
+  for (const [index, a] of tasks.entries()) {
+    for (const b of tasks.slice(index + 1)) {
+      for (const x of a.files) {
+        const y = b.files.find((file) => covers(x, file) || covers(file, x));
+        if (y !== undefined) return `"${x}" of "${a.title}" and "${y}" of "${b.title}"`;
+      }
+    }
+  }
+  return undefined;
+}
+
+/** The files in `files` that are outside the owned files of `task`. */
+export function outside(task: Pick<Task, "files">, files: string[]): string[] {
+  return files.filter((file) => !task.files.some((owner) => covers(owner, file)));
+}
+
+/** The first prompt of a subagent: the contract of its task, with the instructions that the orchestrator added. */
 export function taskPrompt(task: Task): string {
-  return task.additions.length ? `${task.prompt}\n\nAdditional instructions:\n\n${task.additions.join("\n\n")}` : task.prompt;
+  const sections = [
+    `# Task ${task.id}: ${task.title}`,
+    `## Shared contract\n\n${task.contract}`,
+    `## Goal\n\n${task.goal}`,
+    `## Owned files\n\nChange only these files. A path that ends with / covers its folder.\n\n${task.files.map((file) => `- ${file}`).join("\n")}`,
+    `## Inputs\n\n${task.inputs}`,
+    `## Outputs\n\n${task.outputs}`,
+    `## Acceptance criteria\n\n${task.criteria}`,
+  ];
+  if (task.additions.length) sections.push(`## Additional instructions\n\n${task.additions.join("\n\n")}`);
+  return sections.join("\n\n");
 }
 
 function cut(text: string, limit: number): string {
@@ -64,6 +99,15 @@ function report(state: ChatState): string {
   return parts.filter(Boolean).join("\n\n") || "(no text)";
 }
 
+function changesText({ files, outside }: Changes): string {
+  return [
+    files.length ? `Changed files: ${files.join(", ")}` : "No changed files.",
+    outside.length && `Changed files outside the owned files: ${outside.join(", ")}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 function formatDuration(ms: number): string {
   const seconds = Math.round(ms / 1000);
   const minutes = Math.floor(seconds / 60);
@@ -83,53 +127,53 @@ export function taskLine(task: Task, state?: ChatState, cost?: number): string {
     .join(" · ");
 }
 
-/** The view of a task for `get_task`. `state` and `cost` are absent before the task starts. */
-export function describeTask(task: Task, state?: ChatState, cost?: number): string {
+/**
+ * The view of a task for `get_task`. `state` and `cost` are absent before the subagent starts. `changes` is absent when
+ * the task has no worktree.
+ */
+export function describeTask(task: Task, state?: ChatState, cost?: number, changes?: Changes): string {
   const status =
     task.status === "running" && task.started
       ? `running for ${formatDuration(Date.now() - task.started)}`
       : task.status;
   const lines = [`Task ${task.id}: ${task.title}`, `Status: ${status}`];
   if (task.note) lines.push(`Note: ${task.note}`);
-  lines.push("", "Prompt:", task.prompt);
-  if (task.additions.length) {
-    lines.push("", "Added instructions:", ...task.additions.map((item, index) => `${index + 1}. ${item}`));
-  }
-  if (!state) return lines.join("\n");
-
-  const calls = toolCalls(state);
-  const results = new Map(
-    state.messages.flatMap((message) => (message.role === "toolResult" ? [[message.toolCallId, message] as const] : [])),
-  );
-  const current = calls.at(-1);
-  if (state.running && current && !results.has(current.id)) lines.push("", `Current tool: ${describeCall(current)}`);
-  if (calls.length) {
-    lines.push("", `Recent tool calls (${Math.min(calls.length, RECENT_CALLS)} of ${calls.length}):`);
-    for (const call of calls.slice(-RECENT_CALLS)) {
-      lines.push(`- ${describeCall(call)}${results.get(call.id)?.isError ? " (error)" : ""}`);
+  if (changes) lines.push(`Worktree: ${task.worktree}`, `Branch: ${task.branch}`, `Base commit: ${task.base}`);
+  lines.push("", "Instructions:", taskPrompt(task));
+  if (state) {
+    const calls = toolCalls(state);
+    const results = new Map(
+      state.messages.flatMap((message) => (message.role === "toolResult" ? [[message.toolCallId, message] as const] : [])),
+    );
+    const current = calls.at(-1);
+    if (state.running && current && !results.has(current.id)) lines.push("", `Current tool: ${describeCall(current)}`);
+    if (calls.length) {
+      lines.push("", `Recent tool calls (${Math.min(calls.length, RECENT_CALLS)} of ${calls.length}):`);
+      for (const call of calls.slice(-RECENT_CALLS)) {
+        lines.push(`- ${describeCall(call)}${results.get(call.id)?.isError ? " (error)" : ""}`);
+      }
     }
   }
-  const changes = calls.filter((call) => (call.name === "edit" || call.name === "write") && typeof call.arguments.path === "string");
-  if (changes.length) {
-    lines.push("", `Changed files: ${[...new Set(changes.map((call) => call.arguments.path))].join(", ")}`);
-    const diffs = changes.flatMap((call) => {
-      const diff = results.get(call.id)?.details?.diff;
-      return diff ? [`--- ${call.arguments.path}\n${diff}`] : [];
-    });
-    if (diffs.length) lines.push("", "Diffs:", cut(diffs.join("\n\n"), DIFF_LIMIT));
+  if (changes) {
+    lines.push("", changesText(changes));
+    if (changes.diff) lines.push("", "Diff since the base commit:", cut(changes.diff, DIFF_LIMIT));
   }
-  const latest = messages(state).findLast((message) => message.role === "assistant" && text(message));
-  if (latest?.role === "assistant") lines.push("", "Latest assistant text:", cut(text(latest), TEXT_LIMIT));
+  if (state) {
+    const latest = messages(state).findLast((message) => message.role === "assistant" && text(message));
+    if (latest?.role === "assistant") lines.push("", "Latest assistant text:", cut(text(latest), TEXT_LIMIT));
+  }
   if (cost !== undefined) lines.push("", `Cost: $${cost.toFixed(2)}`);
   return lines.join("\n");
 }
 
 /** The task update for the orchestrator, after a run of the task ended. `state` is absent when the task did not start. */
-export function updateText(task: Task, state?: ChatState): string {
+export function updateText(task: Task, changes: Changes, state?: ChatState): string {
   return [
     `Task ${task.id} "${task.title}" is now in ${task.status}.`,
     task.note && `Note: ${task.note}`,
     task.direct && "The user sent messages to this subagent directly.",
+    `Branch: ${task.branch}`,
+    changesText(changes),
     state && `Last answer of the subagent:\n\n${report(state)}`,
   ]
     .filter(Boolean)

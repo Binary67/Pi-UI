@@ -2,15 +2,14 @@ import { Workflow, X } from "lucide-react";
 import type { TaskStatus, TaskSummary } from "../shared/protocol.ts";
 
 export const TASK_LABELS: Record<TaskStatus, string> = {
-  queued: "Queued",
   running: "Running",
   review: "Review",
   done: "Done",
   cancelled: "Cancelled",
 };
-// The done tasks first, then the task that is running or in review, then the queue. The sort is stable, so each group
-// keeps the queue order.
-const ORDER: Record<TaskStatus, number> = { done: 0, cancelled: 0, running: 1, review: 1, queued: 2 };
+// The done tasks first, then the tasks that are running or in review. The sort is stable, so each group keeps the start
+// order.
+const ORDER: Record<TaskStatus, number> = { done: 0, cancelled: 0, running: 1, review: 1 };
 
 type TaskBoardProps = {
   tasks: TaskSummary[];
@@ -24,7 +23,7 @@ type TaskBoardProps = {
   onOrchestrator?: () => void;
 };
 
-/** The tasks of the orchestrator of a project, in one column. A click on a started task opens its subagent session. */
+/** The tasks of the orchestrator of a project, in one column. A click on a task opens its subagent session. */
 export function TaskBoard({ tasks, active, open, onOpen, onClose, onOrchestrator }: TaskBoardProps) {
   return (
     <aside className={open ? "board open" : "board"}>

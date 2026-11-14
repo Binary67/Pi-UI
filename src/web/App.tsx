@@ -327,6 +327,27 @@ export function App() {
     send({ type: "orchestrator", cwd: path.trim() });
   }
 
+  /** True when the project in `path` has no running task and no task in review, or the user agrees to lose their work. */
+  function confirmDrop(path: string): boolean {
+    const active = (tasks[path] ?? []).some((task) => task.status === "running" || task.status === "review");
+    return (
+      !active ||
+      confirm("Tasks of the orchestrator are still running or in review. Their unmerged work will be lost. Continue?")
+    );
+  }
+
+  /** Replace the orchestrator of the project in `path`. The old one and the sessions of its tasks leave the sidebar. */
+  function newOrchestrator(path: string) {
+    if (!confirmDrop(path)) return;
+    setErrors([]);
+    setBoard(false);
+    send({ type: "new_orchestrator", cwd: path });
+  }
+
+  function removeProject(path: string) {
+    if (confirmDrop(path)) send({ type: "remove_project", path });
+  }
+
   /** Show the session in `file`, or go back to it when the page already shows it. */
   function openSession(path: string, file: string) {
     setBoard(false);
@@ -506,11 +527,7 @@ export function App() {
                 <span className="project-name">{folderName(project.path)}</span>
               </button>
               {project.path !== session?.cwd && !project.sessions.some((item) => statuses[item.file] === "running") && (
-                <button
-                  className="row-action"
-                  onClick={() => send({ type: "remove_project", path: project.path })}
-                  title="Remove project"
-                >
+                <button className="row-action" onClick={() => removeProject(project.path)} title="Remove project">
                   <X size={14} />
                 </button>
               )}
@@ -587,6 +604,11 @@ export function App() {
             {showBoard && (
               <button className="icon-button board-button" onClick={() => setBoard(true)} title="Show tasks">
                 <ListTodo size={18} />
+              </button>
+            )}
+            {showChat && orchestrator?.file === session.file && (
+              <button className="icon-button" onClick={() => newOrchestrator(session.cwd)} title="New orchestrator">
+                <Workflow size={18} />
               </button>
             )}
             {showChat && (
@@ -700,7 +722,9 @@ export function App() {
               {picking === "orchestrator" ? (
                 <>
                   <h1>Orchestrator</h1>
-                  <p className="welcome-sub">Choose a project. Each project has one orchestrator.</p>
+                  <p className="welcome-sub">
+                    Choose a project. An orchestrator solves one problem. For the next problem, start a new orchestrator.
+                  </p>
                   {projects.length > 0 && (
                     <ul className="folders project-list">
                       {projects.map((project) => (
