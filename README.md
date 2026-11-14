@@ -33,9 +33,9 @@ from the same installation. Pi upgrades may require updating this integration.
 ## Orchestrator
 
 An orchestrator solves one problem of a project with subagents. The workflow button in a project row of the sidebar
-starts the orchestrator of that project. The sidebar has no Orchestrator item and no project list screen. The button
-opens the empty orchestrator of the project when it has one (an orchestrator without a message). Otherwise it starts a
-new orchestrator. For the next problem, start a new orchestrator with a fresh context.
+starts the orchestrator of that project. The button opens the empty orchestrator of the project when it has one (an
+orchestrator without a message). Otherwise it starts a new orchestrator. For the next problem, start a new orchestrator
+with a fresh context.
 
 A project can have many orchestrators. The sidebar lists them under the project, newest first, above the sessions, with
 a workflow icon. A row shows "New orchestrator" until the first message of the orchestrator gives it a title.
