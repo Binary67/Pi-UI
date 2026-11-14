@@ -323,7 +323,10 @@ export function App() {
     send({ type: "start", cwd: path.trim(), file });
   }
 
-  /** Show the empty orchestrator of the project in `path`, or a new one when it has none. The other orchestrators of the project stay. */
+  /**
+   * Show the empty orchestrator of the project in `path`, or a new one when it has none. The other orchestrators of
+   * the project stay.
+   */
   function startOrchestrator(path: string) {
     setErrors([]);
     setDrawer(false);
@@ -547,12 +550,12 @@ export function App() {
                 <span className="project-name">{folderName(project.path)}</span>
               </button>
               {project.path !== session?.cwd &&
-!project.sessions.some((item) => statuses[item.file] === "running") &&
-!project.orchestrators.some((item) => statuses[item.file] === "running") && (
-                <button className="row-action" onClick={() => removeProject(project)} title="Remove project">
-                  <X size={14} />
-                </button>
-              )}
+                !project.sessions.some((item) => statuses[item.file] === "running") &&
+                !project.orchestrators.some((item) => statuses[item.file] === "running") && (
+                  <button className="row-action" onClick={() => removeProject(project)} title="Remove project">
+                    <X size={14} />
+                  </button>
+                )}
               <button className="row-action new-session" onClick={() => start(project.path)} title="New session">
                 <SquarePen size={14} />
               </button>
