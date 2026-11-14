@@ -2031,16 +2031,24 @@ textarea::placeholder {
     display: none;
   }
 
-  /* The branch name is shorter, and its list ends at the pill, so the list stays on the screen. */
+  /* The branch name is shorter, and its list spans the footer instead of the pill, so the list stays on the screen. */
+  .session-footer {
+    position: relative;
+  }
+
+  .branch-menu {
+    position: static;
+  }
+
   .branch-menu .pill-label {
     max-width: 96px;
   }
 
   .branch-menu .menu-panel {
     right: 0;
-    left: auto;
-    width: min(280px, calc(100vw - 32px));
-    transform-origin: bottom right;
+    left: 0;
+    width: auto;
+    transform-origin: bottom center;
   }
 
   .waveform {
