@@ -32,26 +32,37 @@ from the same installation. Pi upgrades may require updating this integration.
 
 ## Orchestrator
 
-An orchestrator solves one problem of a project with subagents. **Orchestrator** in the sidebar opens the orchestrator
-of a project, or starts one. For the next problem, **New orchestrator** in the header starts a new one with a fresh
-context. The old orchestrator and the sessions of its tasks then leave the sidebar. Their session files stay.
+An orchestrator solves one problem of a project with subagents. **Orchestrator** in the sidebar shows a list of
+projects and a folder field. A choice starts a new orchestrator in that project. For the next problem, start a new
+orchestrator with a fresh context.
+
+A project can have many orchestrators. The sidebar lists them under the project, newest first, above the sessions, with
+a workflow icon. A row shows "New orchestrator" until the first message of the orchestrator gives it a title.
+**New orchestrator** in the header of an orchestrator starts another orchestrator in the same project. The other
+orchestrators stay.
+
+The **X** of an orchestrator row removes the orchestrator from the sidebar, with the sessions of its tasks. When tasks
+are running or in review, the UI asks first, because their unmerged work is lost. The server cancels the active tasks:
+their subagents stop, and their worktrees and branches are deleted. The session files stay. The **X** is hidden while
+the orchestrator runs. When you remove a project, its orchestrators are removed in the same way.
 
 1. You discuss the problem with the orchestrator. It splits the problem into tasks, and writes a contract: a shared
    contract for all tasks, and for each task the goal, the owned files, the inputs, the outputs, and the acceptance
    criteria. A file belongs to only one active task.
 2. After you agree, the orchestrator starts the tasks in parallel. Each task gets a new git worktree in
-   `~/.pi-ui/worktrees/` and a new branch from the last commit. The server runs the setup command of the plan in the
-   worktree, such as `npm ci`, and then starts the subagent there.
+   `~/.pi-ui/worktrees/<orchestrator id>/task-<task id>` and a new branch from the last commit. The server runs the
+   setup command of the plan in the worktree, such as `npm ci`, and then starts the subagent there.
 3. When a subagent run ends, the server commits the changes on the task branch. The task goes to review, and the
    orchestrator gets a task update with the changed files. The update also lists the changed files outside the owned
    files.
 4. The orchestrator reviews the branch, and sends corrections or merges it with `git`. After the merge, it accepts the
    task. The server then stops the subagent and deletes the worktree and the branch. It also deletes them when the
-   orchestrator cancels a task, or when you start a new orchestrator.
+   orchestrator cancels a task, when you remove the orchestrator, or when you remove the project.
 
 - The project must be the top folder of a git repository, with at least one commit and no uncommitted changes.
-- The task board on the right shows the tasks. A click on a card opens the session of its task. You can type in the
-  session of a running task or a task in review. A done or cancelled task accepts no prompts.
+- The task board on the right shows the tasks of the orchestrator on the page, or of the orchestrator of the subagent
+  session on the page. A click on a card opens the session of its task. You can type in the session of a running task
+  or a task in review. A done or cancelled task accepts no prompts.
 - The orchestrator has read tools, `bash` for git and checks, and its task tools. It does not edit files.
 
 The orchestrator loads the Pi extension in `src/orchestrator/extension.ts`, with the instructions in
