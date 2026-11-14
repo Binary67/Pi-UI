@@ -152,6 +152,29 @@ export function App() {
     let pingTimer: ReturnType<typeof setInterval> | undefined;
     /** The wait for an answer to the last ping. */
     let pongTimer: ReturnType<typeof setTimeout> | undefined;
+    /** The event messages that wait for the next animation frame, and the scheduled frame. */
+    let queue: Extract<ServerMessage, { type: "event" }>[] = [];
+    let frame: number | undefined;
+
+    /** Apply the queued events in one state update. */
+    function flush() {
+      frame = undefined;
+      const events = queue;
+      queue = [];
+      setSession((current) => {
+        if (!current) return current;
+        let state = current.state;
+        for (const { file, event } of events) if (file === current.file) state = applyEvent(state, event);
+        return state === current.state ? current : { ...current, state };
+      });
+    }
+
+    /** Drop the queued events and the scheduled frame. */
+    function dropQueue() {
+      queue = [];
+      if (frame !== undefined) cancelAnimationFrame(frame);
+      frame = undefined;
+    }
 
     function connect() {
       timer = undefined;
@@ -181,6 +204,8 @@ export function App() {
             setRemoteUrl(data.url);
             break;
           case "snapshot":
+            // The snapshot has the queued events already.
+            dropQueue();
             setSession(data.session);
             setErrors([]);
             setLoading(false);
@@ -209,9 +234,8 @@ export function App() {
             setCwd((current) => current || data.listing.path);
             break;
           case "event":
-            setSession((current) =>
-              current?.file === data.file ? { ...current, state: applyEvent(current.state, data.event) } : current,
-            );
+            queue.push(data);
+            frame ??= requestAnimationFrame(flush);
             break;
           case "info":
             setSession((current) => (current?.file === data.file ? { ...current, info: data.info } : current));
@@ -250,6 +274,7 @@ export function App() {
       clearInterval(pingTimer);
       clearTimeout(pongTimer);
       pongTimer = undefined;
+      dropQueue();
       socketRef.current = null;
       setConnected(false);
       setLoading(false);
@@ -281,6 +306,7 @@ export function App() {
       clearTimeout(timer);
       clearInterval(pingTimer);
       clearTimeout(pongTimer);
+      dropQueue();
       socket.onclose = null;
       socket.close();
     };
