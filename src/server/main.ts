@@ -48,6 +48,7 @@ import {
   taskPrompt,
   updateText,
 } from "./tasks.ts";
+import { readUsage } from "./usage.ts";
 import {
   addWorktree,
   changedFiles,
@@ -100,6 +101,8 @@ const SUBAGENT_ARGS = ["--append-system-prompt", join(ORCHESTRATOR_DIR, "subagen
 const SUBAGENT_MODEL = process.env.PI_UI_SUBAGENT_MODEL || null;
 // The worktrees of the tasks, in a folder for each orchestrator: `<orchestrator id>/task-<task id>`.
 const WORKTREES_DIR = join(homedir(), ".pi-ui", "worktrees");
+// The session files of Pi, which the usage dashboard reads.
+const SESSIONS_DIR = join(homedir(), ".pi", "agent", "sessions");
 
 type Session = { cwd: string; file: string; pi: PiProcess; state: ChatState; info: SessionInfo; timer?: NodeJS.Timeout };
 
@@ -759,6 +762,8 @@ async function handle(socket: WebSocket, message: ClientMessage): Promise<void> 
       return send(socket, { type: "folders", listing: await listFolders(message.path) });
     case "transcribe":
       return send(socket, { type: "transcript", text: await transcribe(message.audio, message.mimeType) });
+    case "get_usage":
+      return send(socket, { type: "usage", days: await readUsage(SESSIONS_DIR, new Date()) });
     case "start":
     case "orchestrator": {
       const run = (starting.get(socket) ?? Promise.resolve()).then(() =>
