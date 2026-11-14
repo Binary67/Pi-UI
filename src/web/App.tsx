@@ -43,6 +43,8 @@ import { SessionFooter } from "./SessionFooter.tsx";
 /** Distance in pixels from the page bottom that still counts as "at the bottom". */
 const BOTTOM_SLACK = 80;
 const COMPOSER_MAX_HEIGHT = 200;
+/** The session that this browser shows. A reconnect or a reload opens it again. */
+const VIEW_KEY = "pi-ui:session";
 /** The image types that Pi accepts in a prompt. */
 const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 /** The wait before the first reconnect. Each failed attempt doubles it, up to the maximum. */
@@ -84,8 +86,6 @@ function scrollToBottom(behavior: ScrollBehavior): void {
 export function App() {
   const socketRef = useRef<WebSocket | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  /** The session that this tab shows. A reconnect opens it again. A reload clears it and shows the welcome screen. */
-  const viewRef = useRef<{ cwd: string; file: string } | null>(null);
   const [connected, setConnected] = useState(false);
   const [remoteUrl, setRemoteUrl] = useState<string | null>(null);
   const [cwd, setCwd] = useState("");
@@ -98,7 +98,8 @@ export function App() {
   const [statuses, setStatuses] = useState<Record<string, SessionStatus>>({});
   const [session, setSession] = useState<SessionSnapshot | null>(null);
   const [picking, setPicking] = useState(false);
-  const [loading, setLoading] = useState(false);
+  // A saved session opens at once. The skeleton shows until it opens, so the welcome screen does not flash.
+  const [loading, setLoading] = useState(() => localStorage.getItem(VIEW_KEY) !== null);
   const [errors, setErrors] = useState<string[]>([]);
   const [text, setText] = useState("");
   const [images, setImages] = useState<PromptImage[]>([]);
@@ -119,8 +120,11 @@ export function App() {
         delay = RECONNECT_MIN_MS;
         setConnected(true);
         send({ type: "list_folders", path: "" });
-        const view = viewRef.current;
-        if (view) send({ type: "start", cwd: view.cwd, file: view.file });
+        const view = localStorage.getItem(VIEW_KEY);
+        if (view) {
+          const { cwd, file } = JSON.parse(view) as { cwd: string; file: string };
+          send({ type: "start", cwd, file });
+        }
       };
       socket.onclose = () => {
         setConnected(false);
@@ -141,8 +145,12 @@ export function App() {
             setSession(data.session);
             setErrors([]);
             setLoading(false);
-            viewRef.current = data.session ? { cwd: data.session.cwd, file: data.session.file } : null;
-            if (data.session) setPicking(false);
+            if (data.session) {
+              setPicking(false);
+              localStorage.setItem(VIEW_KEY, JSON.stringify({ cwd: data.session.cwd, file: data.session.file }));
+            } else {
+              localStorage.removeItem(VIEW_KEY);
+            }
             break;
           case "starting":
             setLoading(true);

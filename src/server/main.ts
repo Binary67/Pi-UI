@@ -211,6 +211,11 @@ function release(file: string): void {
 
 /** Show a new session in `folder`, or the session in `file`, on the page of `socket`. */
 async function start(socket: WebSocket, folder: string, file?: string): Promise<void> {
+  // A saved session can be gone: removed, or a new session that stopped before Pi saved it. The page shows the start
+  // screen. The check runs first, so a removed project is not added again.
+  if (file && !sessions.has(file) && !opening.has(file) && !isKept(file)) {
+    return send(socket, { type: "snapshot", session: null });
+  }
   const cwd = resolve(folder);
   const info = await stat(cwd).catch(() => undefined);
   if (!info?.isDirectory()) throw new Error(`Folder not found: ${folder}`);
