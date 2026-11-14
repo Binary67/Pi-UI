@@ -7,6 +7,7 @@ import {
   CornerLeftUp,
   Folder,
   FolderPlus,
+  LayoutDashboard,
   ListTodo,
   Menu,
   Pi,
@@ -43,7 +44,9 @@ import type {
   SessionStatus,
   StreamingBehavior,
   TaskSummary,
+  UsageDay,
 } from "../shared/protocol.ts";
+import { Dashboard } from "./Dashboard.tsx";
 import { Banner, MessageView, Skeleton, type ToolResults, WorkGroup, Working } from "./Message.tsx";
 import { MicButton } from "./MicButton.tsx";
 import { Remote } from "./Remote.tsx";
@@ -131,8 +134,10 @@ export function App() {
   const [branchState, setBranchState] = useState<{ file: string; branch: BranchInfo | null } | null>(null);
   /** The start screen shows to choose a folder for a new session. */
   const [picking, setPicking] = useState(false);
-  /** The settings page shows. It replaces the chat and the start screen. */
-  const [settings, setSettings] = useState(false);
+  /** The settings page or the dashboard shows. It replaces the chat and the start screen. */
+  const [page, setPage] = useState<"settings" | "dashboard" | null>(null);
+  /** The usage of the last 30 days. Null while the page waits for the server. */
+  const [usage, setUsage] = useState<UsageDay[] | null>(null);
   // A saved session opens at once. The skeleton shows until it opens, so the welcome screen does not flash.
   const [loading, setLoading] = useState(() => localStorage.getItem(VIEW_KEY) !== null);
   const [errors, setErrors] = useState<string[]>([]);
@@ -142,7 +147,7 @@ export function App() {
   const [transcribing, setTranscribing] = useState(false);
   const [atBottom, setAtBottom] = useState(true);
   const running = session?.state.running ?? false;
-  const showChat = session && !picking && !settings && !loading;
+  const showChat = session && !picking && page === null && !loading;
 
   useEffect(() => {
     let socket: WebSocket;
@@ -249,6 +254,9 @@ export function App() {
           case "transcript":
             setText((current) => [current, data.text].filter((part) => part.trim()).join(" "));
             setTranscribing(false);
+            break;
+          case "usage":
+            setUsage(data.days);
             break;
           case "error":
             setErrors((current) => [...current, data.message]);
@@ -359,7 +367,7 @@ export function App() {
 
   function start(path: string, file?: string) {
     setErrors([]);
-    setSettings(false);
+    setPage(null);
     setDrawer(false);
     send({ type: "start", cwd: path.trim(), file });
   }
@@ -370,7 +378,7 @@ export function App() {
    */
   function startOrchestrator(path: string) {
     setErrors([]);
-    setSettings(false);
+    setPage(null);
     setDrawer(false);
     setBoard(false);
     send({ type: "orchestrator", cwd: path.trim() });
@@ -405,23 +413,32 @@ export function App() {
     setBoard(false);
     if (file !== session?.file) return start(path, file);
     setPicking(false);
-    setSettings(false);
+    setPage(null);
     setDrawer(false);
   }
 
   function pick() {
     setCwd("");
     setPicking(true);
-    setSettings(false);
+    setPage(null);
     setDrawer(false);
     send({ type: "list_folders", path: "" });
   }
 
   function openSettings() {
-    setSettings(true);
+    setPage("settings");
     setPicking(false);
     setDrawer(false);
     setBoard(false);
+  }
+
+  function openDashboard() {
+    setPage("dashboard");
+    setUsage(null);
+    setPicking(false);
+    setDrawer(false);
+    setBoard(false);
+    send({ type: "get_usage" });
   }
 
   function toggleProject(path: string) {
@@ -638,6 +655,10 @@ export function App() {
             Bots
             <span className="soon">Soon</span>
           </button>
+          <button className="nav-item" onClick={openDashboard}>
+            <LayoutDashboard size={16} />
+            Dashboard
+          </button>
           <div className="sidebar-heading">
             <span className="project-name">Projects</span>
             <button className="row-action" onClick={pick} title="Add project">
@@ -750,7 +771,7 @@ export function App() {
           <button className="icon-button menu-button" onClick={() => setDrawer(true)} title="Open sidebar">
             <Menu size={18} />
           </button>
-          {loading && !settings && <span className="skeleton skeleton-chip" />}
+          {loading && page === null && <span className="skeleton skeleton-chip" />}
           {showChat && (
             <span className="chip" title={session.cwd}>
               <Folder size={14} />
@@ -784,8 +805,10 @@ export function App() {
           </div>
         )}
 
-        {settings ? (
-          <Settings onBack={session ? () => setSettings(false) : undefined} />
+        {page === "settings" ? (
+          <Settings onBack={session ? () => setPage(null) : undefined} />
+        ) : page === "dashboard" ? (
+          <Dashboard days={usage} onBack={session ? () => setPage(null) : undefined} />
         ) : loading ? (
           <Skeleton />
         ) : showChat ? (
