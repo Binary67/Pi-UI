@@ -91,6 +91,8 @@ const ORCHESTRATOR_ARGS = [
   "read,grep,find,ls,bash,start_tasks,list_tasks,get_task,message_task,finish_task,cancel_task",
 ];
 const SUBAGENT_ARGS = ["--append-system-prompt", join(ORCHESTRATOR_DIR, "subagent.md")];
+// The model of new subagent sessions from `.env`, as a Pi `--model` pattern. Empty or absent, Pi uses its default.
+const SUBAGENT_MODEL = process.env.PI_UI_SUBAGENT_MODEL || null;
 // The worktrees of the tasks, in a folder for each orchestrator: `<orchestrator id>/task-<task id>`.
 const WORKTREES_DIR = join(homedir(), ".pi-ui", "worktrees");
 
@@ -495,7 +497,11 @@ async function launchTask(path: string, task: Task): Promise<void> {
     if (task.setup) await runSetup(task.worktree, task.setup);
     // The task can be cancelled during its setup.
     if (task.status !== "running") return;
-    const session = register(await launch(path, undefined, [...SUBAGENT_ARGS, "--name", task.title], task.worktree));
+    // A session records its model, so only a new subagent session gets `--model`.
+    const model = SUBAGENT_MODEL ? ["--model", SUBAGENT_MODEL] : [];
+    const session = register(
+      await launch(path, undefined, [...SUBAGENT_ARGS, ...model, "--name", task.title], task.worktree),
+    );
     task.file = session.file;
     saveTasks();
     await session.pi.send({ type: "prompt", message: taskPrompt(task) });

@@ -58,6 +58,10 @@ The orchestrator loads the Pi extension in `src/orchestrator/extension.ts`, with
 `src/orchestrator/orchestrator.md`. Subagents get the instructions in `src/orchestrator/subagent.md`. They tell a
 subagent to skip the discussion step of an `AGENTS.md`, because the user already approved the plan.
 
+Subagents use the default model of Pi. To use a different model, set `PI_UI_SUBAGENT_MODEL` in `.env` to a Pi
+`--model` pattern, such as `azure-foundry-claude/claude-sonnet-5-5:high`. Then restart both servers. The model applies
+only to new subagents. A subagent session keeps its model when it opens again.
+
 ## Remote access with Tailscale
 
 Open the UI from another device in your tailnet, such as a laptop or a phone.
