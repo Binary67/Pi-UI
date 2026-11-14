@@ -11,6 +11,8 @@ import type {
 const DIALOG_METHODS = new Set(["select", "confirm", "input", "editor"]);
 // The orchestrator extension sends its requests as editor dialogs with this title prefix. See src/orchestrator/extension.ts.
 const REQUEST_PREFIX = "pi-ui:";
+// Time that Pi gets to exit after stdin is closed. After this time, stop() kills it.
+const STOP_GRACE_MS = 10_000;
 
 /** Handles a request of the orchestrator extension. Returns the text for the model, or throws an error for it. */
 export type RequestHandler = (name: string, params: unknown) => Promise<string>;
@@ -89,10 +91,13 @@ export class PiProcess {
     return this.failure !== undefined || this.child.exitCode !== null || this.child.signalCode !== null;
   }
 
-  /** Close stdin, so Pi finishes pending work and exits. Resolves when the process has exited. */
-  stop(): Promise<void> {
+  /** Close stdin, so Pi finishes pending work and exits. Kills Pi with SIGKILL when it is still running after `graceMs`. Resolves when the process has exited. */
+  stop(graceMs = STOP_GRACE_MS): Promise<void> {
     this.child.stdin.end();
-    return this.closed;
+    const timer = setTimeout(() => {
+      if (this.child.exitCode === null && this.child.signalCode === null) this.child.kill("SIGKILL");
+    }, graceMs);
+    return this.closed.finally(() => clearTimeout(timer));
   }
 
   private fail(error: Error): void {
