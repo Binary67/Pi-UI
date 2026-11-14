@@ -45,6 +45,8 @@ The subagent sessions of an orchestrator show as child rows under its row, in th
 show in the list of sessions. An orchestrator with child rows has a chevron. The chevron folds and unfolds the child
 rows, and a click on the title still opens the orchestrator. Orchestrators start folded. An orchestrator also shows its
 child rows while the page shows one of its task sessions. A child row works like a session row, with its own **X**.
+The **X** of a child row is hidden while its task is running or in review. An orchestrator and the sessions of its tasks
+cannot be forked.
 
 The **X** of an orchestrator row removes the orchestrator from the sidebar, with the sessions of its tasks. When tasks
 are running or in review, the UI asks first, because their unmerged work is lost. The server cancels the active tasks:
@@ -174,7 +176,7 @@ microphone permission.
 
 ```bash
 npm run typecheck
-node --test src/server/pi-process.test.ts src/server/session-files.test.ts src/server/tasks.test.ts src/server/worktrees.test.ts
+node --test src/server/*.test.ts
 ```
 
 The focused tests use temporary files, temporary git repositories, and a fake Pi
