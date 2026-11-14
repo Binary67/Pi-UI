@@ -227,7 +227,7 @@ async function start(socket: WebSocket, folder: string, file?: string): Promise<
   if (file && !sessions.has(file) && !opening.has(file) && !isKept(file)) {
     return send(socket, { type: "snapshot", session: null });
   }
-  const cwd = resolve(folder);
+  const cwd = toPath(folder);
   const info = await stat(cwd).catch(() => undefined);
   if (!info?.isDirectory()) throw new Error(`Folder not found: ${folder}`);
   // The sidebar changes only for a new project. Then it shows the project before the session opens.
@@ -258,9 +258,14 @@ async function start(socket: WebSocket, folder: string, file?: string): Promise<
   prepareSpare(cwd);
 }
 
+/** A typed path as a full path. `~` and relative paths start at the home folder, and an empty path is the home folder. */
+function toPath(input: string): string {
+  return resolve(homedir(), input.trim().replace(/^~(?=$|\/)/, homedir()));
+}
+
 /** Subfolders of `path`, or of the home folder when `path` is empty. Hidden folders are left out. */
 async function listFolders(path: string): Promise<FolderListing> {
-  const dir = path.trim() ? resolve(path.trim()) : homedir();
+  const dir = toPath(path);
   // A path that the user is still typing usually does not exist. Show an empty list for it.
   const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
   return {
