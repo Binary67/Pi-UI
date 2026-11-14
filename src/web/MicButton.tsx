@@ -18,13 +18,17 @@ export function savedMicrophone(): Microphone | undefined {
   return value ? (JSON.parse(value) as Microphone) : undefined;
 }
 
-// Without echo cancellation, Safari does not join the microphone and the sound output into one voice-processing
-// unit. With it, a Bluetooth microphone gives silence while the output is on a different Bluetooth device.
-/** Open the microphone that the user chose. When its device ID changed, its label finds it again. */
+/**
+ * Open the microphone that the user chose. When its device ID changed, its label finds it again. Echo cancellation is
+ * off: with it, Safari joins the microphone and the sound output into one voice-processing unit, and a Bluetooth
+ * microphone then gives silence while the output is on a different Bluetooth device.
+ */
 async function openMicrophone(): Promise<MediaStream> {
   const saved = savedMicrophone();
   if (!saved) return navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false } });
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, deviceId: saved.deviceId } });
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: false, deviceId: saved.deviceId },
+  });
   if (stream.getAudioTracks()[0].label === saved.label) return stream;
   // The page has a microphone now, so the browser gives the labels of the devices.
   const found = (await navigator.mediaDevices.enumerateDevices()).find(
@@ -32,7 +36,9 @@ async function openMicrophone(): Promise<MediaStream> {
   );
   for (const track of stream.getTracks()) track.stop();
   if (!found) throw new Error(NOT_CONNECTED);
-  const exact = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, deviceId: { exact: found.deviceId } } });
+  const exact = await navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: false, deviceId: { exact: found.deviceId } },
+  });
   localStorage.setItem(MICROPHONE_KEY, JSON.stringify({ deviceId: found.deviceId, label: saved.label }));
   return exact;
 }
