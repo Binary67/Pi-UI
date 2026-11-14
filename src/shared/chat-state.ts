@@ -29,8 +29,11 @@ export function applyEvent(state: ChatState, event: JsonAgentSessionEvent): Chat
       return { ...state, steering: event.steering, followUp: event.followUp };
     case "message_start":
       return event.message.role === "assistant" ? { ...state, streaming: event.message } : state;
-    case "message_update":
-      return state.streaming ? { ...state, streaming: applyUpdate(state.streaming, event.assistantMessageEvent) } : state;
+    case "message_update": {
+      if (!state.streaming) return state;
+      const streaming = applyUpdate(state.streaming, event.assistantMessageEvent);
+      return streaming === state.streaming ? state : { ...state, streaming };
+    }
     case "message_end":
       // The completed message replaces the streamed copy.
       return {
