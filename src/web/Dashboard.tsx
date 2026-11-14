@@ -39,9 +39,7 @@ function formatCost(cost: number, digits: number): string {
 function formatDuration(ms: number): string {
   if (ms > 0 && ms < 60_000) return `${Math.floor(ms / 1000)}s`;
   const minutes = Math.floor(ms / 60_000);
-  return minutes < 60
-    ? `${minutes}m`
-    : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+  return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
 /** A local date `YYYY-MM-DD` as a short date, for example "Nov 14". */
@@ -80,10 +78,7 @@ function total(days: UsageDay[]): UsageDay {
 }
 
 /** The big number and the subline of the card of `metric`. */
-function summary(
-  sum: UsageDay,
-  metric: Metric,
-): { main: string; sub?: string } {
+function summary(sum: UsageDay, metric: Metric): { main: string; sub?: string } {
   switch (metric) {
     case "cost":
       return { main: formatCost(sum.cost, 2) };
@@ -117,13 +112,7 @@ function Row({ label, text }: { label: string; text: string }) {
 }
 
 /** The dashboard page: the usage of the last 30 days in cards and a chart. `days` is null while the page waits. */
-export function Dashboard({
-  days,
-  onBack,
-}: {
-  days: UsageDay[] | null;
-  onBack?: () => void;
-}) {
+export function Dashboard({ days, onBack }: { days: UsageDay[] | null; onBack?: () => void }) {
   const [metric, setMetric] = useState<Metric>("cost");
   const sum = days && total(days);
   const max = days ? Math.max(...days.map((day) => value(day, metric))) : 0;
@@ -142,9 +131,7 @@ export function Dashboard({
                 return (
                   <button
                     key={key}
-                    className={
-                      key === metric ? "metric-card active" : "metric-card"
-                    }
+                    className={key === metric ? "metric-card active" : "metric-card"}
                     aria-pressed={key === metric}
                     onClick={() => setMetric(key)}
                   >
@@ -163,49 +150,25 @@ export function Dashboard({
                   return (
                     <div
                       key={day.date}
-                      className={
-                        index < days.length / 2
-                          ? "dashboard-bar left"
-                          : "dashboard-bar right"
-                      }
+                      className={index < days.length / 2 ? "dashboard-bar left" : "dashboard-bar right"}
                       tabIndex={0}
                     >
                       <div
-                        className={
-                          amount > 0 ? "dashboard-fill" : "dashboard-fill empty"
-                        }
+                        className={amount > 0 ? "dashboard-fill" : "dashboard-fill empty"}
                         style={{
-                          height:
-                            amount > 0 ? `${(100 * amount) / max}%` : undefined,
+                          height: amount > 0 ? `${(100 * amount) / max}%` : undefined,
                         }}
                       />
                       <div className="dashboard-card" role="tooltip">
-                        <div className="dashboard-card-date">
-                          {formatDate(day.date)}
-                        </div>
+                        <div className="dashboard-card-date">{formatDate(day.date)}</div>
                         <Row label="Cost" text={formatCost(day.cost, 3)} />
-                        <Row label="Input" text={formatTokens(day.input)} />
-                        <Row
-                          label="Cache read"
-                          text={formatTokens(day.cacheRead)}
-                        />
-                        <Row
-                          label="Cache write"
-                          text={formatTokens(day.cacheWrite)}
-                        />
+                        <Row label="Input" text={formatTokens(value(day, "input"))} />
+                        <Row label="Cache read" text={formatTokens(day.cacheRead)} />
+                        <Row label="Cache write" text={formatTokens(day.cacheWrite)} />
                         <Row label="Output" text={formatTokens(day.output)} />
-                        <Row
-                          label="Model time"
-                          text={formatDuration(day.durationMs)}
-                        />
-                        <Row
-                          label="User messages"
-                          text={formatTokens(day.userMessages)}
-                        />
-                        <Row
-                          label="Assistant messages"
-                          text={formatTokens(day.assistantMessages)}
-                        />
+                        <Row label="Model time" text={formatDuration(day.durationMs)} />
+                        <Row label="User messages" text={formatTokens(day.userMessages)} />
+                        <Row label="Assistant messages" text={formatTokens(day.assistantMessages)} />
                       </div>
                     </div>
                   );
@@ -213,9 +176,7 @@ export function Dashboard({
               </div>
               <div className="dashboard-axis">
                 <span>{formatDate(days[0].date)}</span>
-                <span>
-                  {formatDate(days[Math.floor(days.length / 2)].date)}
-                </span>
+                <span>{formatDate(days[Math.floor(days.length / 2)].date)}</span>
                 <span>Today</span>
               </div>
             </section>
