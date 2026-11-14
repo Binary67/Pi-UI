@@ -1,5 +1,39 @@
 import { LoaderCircle, Mic, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { Waveform } from "./Waveform.tsx";
+
+/** The `localStorage` key of the microphone that voice input uses in this browser. No key means the system default. */
+export const MICROPHONE_KEY = "pi-ui:microphone";
+
+/** A microphone that the user chose. The device ID can change between browser launches, but the label stays. */
+export type Microphone = { deviceId: string; label: string };
+
+const SILENCE =
+  "The microphone gives no sound. Choose another microphone below the composer, or see Voice input in the README.";
+const NOT_CONNECTED = "The selected microphone is not connected. Choose another microphone below the composer.";
+
+/** The microphone that the user chose, or undefined for the system default. */
+export function savedMicrophone(): Microphone | undefined {
+  const value = localStorage.getItem(MICROPHONE_KEY);
+  return value ? (JSON.parse(value) as Microphone) : undefined;
+}
+
+/** Open the microphone that the user chose. When its device ID changed, its label finds it again. */
+async function openMicrophone(): Promise<MediaStream> {
+  const saved = savedMicrophone();
+  if (!saved) return navigator.mediaDevices.getUserMedia({ audio: true });
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: saved.deviceId } });
+  if (stream.getAudioTracks()[0].label === saved.label) return stream;
+  // The page has a microphone now, so the browser gives the labels of the devices.
+  const found = (await navigator.mediaDevices.enumerateDevices()).find(
+    (device) => device.kind === "audioinput" && device.label === saved.label,
+  );
+  for (const track of stream.getTracks()) track.stop();
+  if (!found) throw new Error(NOT_CONNECTED);
+  const exact = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: found.deviceId } } });
+  localStorage.setItem(MICROPHONE_KEY, JSON.stringify({ deviceId: found.deviceId, label: saved.label }));
+  return exact;
+}
 
 type MicButtonProps = {
   /** True when the page is not connected. It blocks only a new recording: a tap always stops a recording. */
@@ -12,15 +46,20 @@ type MicButtonProps = {
 };
 
 /**
- * The voice input button of the composer. A tap starts a recording, and a second tap stops it and gives it to
- * `onRecord`. The microphone is on only during a recording. An unmount, such as a session switch, drops the recording.
+ * The voice input button of the composer, with the live level of the recording on its left. A tap starts a recording,
+ * and a second tap stops it and gives it to `onRecord`. A recording with only silence gives an error instead. The
+ * microphone is on only during a recording. An unmount, such as a session switch, drops the recording.
  */
 export function MicButton({ disabled, transcribing, onRecord, onError }: MicButtonProps) {
   const recorderRef = useRef<MediaRecorder>(undefined);
   /** False after an unmount. A recording then stops, and `onRecord` does not get it. */
   const mountedRef = useRef(false);
-  /** True from the tap that starts a recording until the recording stops. */
-  const [recording, setRecording] = useState(false);
+  /** True when a sample of the recording was not exactly 0. */
+  const soundRef = useRef(false);
+  /** True from the tap that starts a recording until the recorder starts. */
+  const [opening, setOpening] = useState(false);
+  /** The level and the microphone name of the recording, from the start of the recorder until it stops. */
+  const [recording, setRecording] = useState<{ analyser: AnalyserNode; label: string }>();
 
   useEffect(() => {
     mountedRef.current = true;
@@ -31,24 +70,39 @@ export function MicButton({ disabled, transcribing, onRecord, onError }: MicButt
   }, []);
 
   async function start() {
-    setRecording(true);
+    // Safari runs an audio context only when the tap creates it, so it comes before the first `await`.
+    const audio = new AudioContext();
+    setOpening(true);
+    soundRef.current = false;
     let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream = await openMicrophone();
     } catch (error) {
-      setRecording(false);
+      setOpening(false);
+      void audio.close();
       return onError(error instanceof Error ? error.message : String(error));
     }
+    const analyser = audio.createAnalyser();
+    audio.createMediaStreamSource(stream).connect(analyser);
     const recorder = new MediaRecorder(stream);
     const chunks: Blob[] = [];
     recorder.ondataavailable = (event) => chunks.push(event.data);
+    recorder.onstart = () => {
+      setOpening(false);
+      setRecording({ analyser, label: stream.getAudioTracks()[0].label });
+    };
     recorder.onstop = () => {
       recorderRef.current = undefined;
-      setRecording(false);
+      setRecording(undefined);
       // The microphone turns off.
       for (const track of stream.getTracks()) track.stop();
+      void audio.close();
       const blob = new Blob(chunks, { type: recorder.mimeType });
-      if (!mountedRef.current || !blob.size) return;
+      if (!mountedRef.current) return;
+      // Safari gives exact zeros from some microphones, such as a Bluetooth microphone while the sound output is on
+      // another Bluetooth device.
+      if (!soundRef.current) return onError(SILENCE);
+      if (!blob.size) return;
       const reader = new FileReader();
       reader.onload = () => {
         const url = reader.result as string;
@@ -63,22 +117,38 @@ export function MicButton({ disabled, transcribing, onRecord, onError }: MicButt
   }
 
   return (
-    <button
-      className={recording ? "mic recording" : "mic"}
-      // A tap while the browser opens the microphone does nothing.
-      onClick={() => (recording ? recorderRef.current?.stop() : void start())}
-      // The composer keeps the focus, so the phone keyboard stays open.
-      onMouseDown={(event) => event.preventDefault()}
-      disabled={(disabled && !recording) || transcribing}
-      title={transcribing ? "Transcribing…" : recording ? "Stop recording" : "Voice input"}
-    >
-      {transcribing ? (
-        <LoaderCircle size={18} className="spin" />
-      ) : recording ? (
-        <Square size={14} fill="currentColor" />
-      ) : (
-        <Mic size={18} />
+    <>
+      {recording && (
+        <Waveform analyser={recording.analyser} label={recording.label} onSound={() => (soundRef.current = true)} />
       )}
-    </button>
+      <button
+        className={recording ? "mic recording" : "mic"}
+        onClick={() => {
+          if (recording) recorderRef.current?.stop();
+          // A tap while the browser opens the microphone does nothing.
+          else if (!opening) void start();
+        }}
+        // The composer keeps the focus, so the phone keyboard stays open.
+        onMouseDown={(event) => event.preventDefault()}
+        disabled={(disabled && !recording && !opening) || transcribing}
+        title={
+          transcribing
+            ? "Transcribing…"
+            : opening
+              ? "Opening the microphone…"
+              : recording
+                ? "Stop recording"
+                : "Voice input"
+        }
+      >
+        {transcribing || opening ? (
+          <LoaderCircle size={18} className="spin" />
+        ) : recording ? (
+          <Square size={14} fill="currentColor" />
+        ) : (
+          <Mic size={18} />
+        )}
+      </button>
+    </>
   );
 }

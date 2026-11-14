@@ -1289,6 +1289,8 @@ textarea::placeholder {
 
 .composer textarea {
   flex: 1;
+  /* The textarea gets narrower, so the waveform of a recording fits on the line on a narrow screen. */
+  min-width: 0;
   max-height: 200px;
   padding: 6px 0;
   font: inherit;
@@ -1299,6 +1301,16 @@ textarea::placeholder {
   outline: none;
   resize: none;
   scrollbar-width: none;
+}
+
+/* The live level of a recording, left of the voice input button. The bars have the color of the text. */
+.waveform {
+  display: block;
+  flex: none;
+  width: 120px;
+  height: 34px;
+  color: var(--text-2);
+  animation: fade-in 0.15s ease-out;
 }
 
 /* The voice input button, left of the send button. It turns red during a recording. */
@@ -1915,6 +1927,21 @@ textarea::placeholder {
   .usage-cost {
     display: none;
   }
+
+  .waveform {
+    width: 88px;
+  }
+
+  /* The microphone pill shows only its icon. Its list opens to the left, so it stays on the screen. */
+  .microphone-menu .pill-label {
+    display: none;
+  }
+
+  .microphone-menu .menu-panel {
+    right: 0;
+    left: auto;
+    transform-origin: bottom right;
+  }
 }
 
 /* Touch screen: there is no hover. The actions that show on hover always show, and the touch targets are larger. */
@@ -1963,6 +1990,10 @@ textarea::placeholder {
   .mic,
   .send {
     width: 40px;
+    height: 40px;
+  }
+
+  .waveform {
     height: 40px;
   }
 
