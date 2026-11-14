@@ -33,13 +33,8 @@ export type SessionInfo = {
 export type ClientMessage =
   /** Show a new session in `cwd`, or the session in `file`. A session that is not live starts in a new Pi process. */
   | { type: "start"; cwd: string; file?: string }
-  /** Show the orchestrator of the project in `cwd`. A project without an orchestrator gets a new one. */
+  /** Show a new orchestrator in the project in `cwd`. Each orchestrator solves one problem. */
   | { type: "orchestrator"; cwd: string }
-  /**
-   * Replace the orchestrator of the project in `cwd` with a new one, then show it. The active tasks of the old one are
-   * cancelled, and its sessions leave the sidebar.
-   */
-  | { type: "new_orchestrator"; cwd: string }
   /** Pi uses `streamingBehavior` only during a run. In an idle session, the prompt starts a run. */
   | { type: "prompt"; file: string; text: string; images: PromptImage[]; streamingBehavior: StreamingBehavior }
   /** Clear the queue, then stop the run. The queued text comes back in a `restore` message. */
@@ -49,6 +44,7 @@ export type ClientMessage =
   /** Copy the session in `file` up to its user message with `timestamp` into a new session, then show it. */
   | { type: "fork"; file: string; timestamp: number }
   | { type: "remove_project"; path: string }
+  /** An orchestrator goes with the sessions of its tasks. Its active tasks are cancelled. */
   | { type: "remove_session"; file: string }
   /** List the subfolders of `path`, or of the home folder when `path` is empty. */
   | { type: "list_folders"; path: string }
@@ -65,8 +61,8 @@ export type SessionSummary = { file: string; title: string; unread: boolean };
 /** A live session runs now, or it is warm: idle, with a Pi process that is ready. */
 export type SessionStatus = "running" | "warm";
 
-/** The orchestrator session of a project. It is not in `sessions`. */
-export type Project = { path: string; sessions: SessionSummary[]; orchestrator?: { file: string; unread: boolean } };
+/** The orchestrator sessions of a project, newest first. They are not in `sessions`. */
+export type Project = { path: string; sessions: SessionSummary[]; orchestrators: SessionSummary[] };
 
 /** The tasks of an orchestrator run in parallel. A task that is `running` or in `review` has its own git worktree. */
 export type TaskStatus = "running" | "review" | "done" | "cancelled";
@@ -97,7 +93,7 @@ export type ServerMessage =
   | { type: "projects"; projects: Project[] }
   /** The status of each live session, by session file. A session that is not in the list is cold. */
   | { type: "status"; sessions: Record<string, SessionStatus> }
-  /** The tasks of each orchestrator in start order, by project path. */
+  /** The tasks of each orchestrator in start order, by the session file of the orchestrator. */
   | { type: "tasks"; tasks: Record<string, TaskSummary[]> }
   | { type: "folders"; listing: FolderListing }
   | { type: "event"; file: string; event: JsonAgentSessionEvent }

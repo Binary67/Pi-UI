@@ -16,22 +16,22 @@ import type {
 } from "../shared/protocol.ts";
 import { PiProcess } from "./pi-process.ts";
 import {
+  addOrchestrator,
   addProject,
   allTasks,
+  findOrchestrator,
   findTask,
-  getOrchestrator,
+  getOrchestrators,
   isKept,
   keepSession,
   listProjects,
   markRead,
   markUnread,
   type Orchestrator,
-  orchestratorPath,
   removeOrchestrator,
   removeProject,
   removeSession,
   saveTasks,
-  setOrchestrator,
   type Task,
 } from "./projects.ts";
 import { forkSession, moveSession } from "./session-files.ts";
@@ -141,7 +141,7 @@ function taskSummary({ id, title, status, file, note, setup }: Task): TaskSummar
 }
 
 function tasksMessage(): ServerMessage {
-  return { type: "tasks", tasks: Object.fromEntries(allTasks().map(([path, tasks]) => [path, tasks.map(taskSummary)])) };
+  return { type: "tasks", tasks: Object.fromEntries(allTasks().map(([file, tasks]) => [file, tasks.map(taskSummary)])) };
 }
 
 async function broadcastProjects(): Promise<void> {
@@ -190,9 +190,9 @@ async function launch(cwd: string, file?: string, args: string[] = [], dir = cwd
       if (!session) return;
       session.state = applyEvent(session.state, event);
       sendToViewers(session.file, { type: "event", file: session.file, event });
-      // Pi saves the session file when the first user message ends. From then on, the sidebar can list it. The
+      // Pi saves the session file when the first user message ends. From then on, the sidebar can list it. An
       // orchestrator has its own row in the sidebar.
-      if (event.type === "message_end" && event.message.role === "user" && !orchestratorPath(session.file)) {
+      if (event.type === "message_end" && event.message.role === "user" && !findOrchestrator(session.file)) {
         keepSession(session.cwd, session.file);
         void broadcastProjects();
       }
@@ -292,7 +292,7 @@ async function open(cwd: string, file?: string): Promise<Session> {
   const live = sessions.get(file) ?? opening.get(file);
   if (live) return live;
   // The orchestrator and the subagents need their extra Pi options each time they open.
-  const args = orchestratorPath(file) ? ORCHESTRATOR_ARGS : findTask(file) ? SUBAGENT_ARGS : [];
+  const args = findOrchestrator(file) ? ORCHESTRATOR_ARGS : findTask(file) ? SUBAGENT_ARGS : [];
   const opened = launch(cwd, file, args).then(register).finally(() => opening.delete(file));
   opening.set(file, opened);
   return opened;
@@ -360,39 +360,28 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/**
- * Show the orchestrator of the project in `folder` on the page of `socket`. A project without one gets a new one. With
- * `fresh`, a new orchestrator replaces the old one.
- */
-async function startOrchestrator(socket: WebSocket, folder: string, fresh: boolean): Promise<void> {
+/** Show a new orchestrator in the project in `folder` on the page of `socket`. Each orchestrator solves one problem. */
+async function startOrchestrator(socket: WebSocket, folder: string): Promise<void> {
   const cwd = toPath(folder);
   const info = await stat(cwd).catch(() => undefined);
   if (!info?.isDirectory()) throw new Error(`Folder not found: ${folder}`);
   if (addProject(cwd)) await broadcastProjects();
-  if (fresh) {
-    // This page waits for the new orchestrator. It does not go back to the start screen with the other pages.
-    views.delete(socket);
-    send(socket, { type: "starting" });
-    await dropOrchestrator(cwd);
-  }
-  let file = getOrchestrator(cwd)?.file;
-  if (!file) {
-    send(socket, { type: "starting" });
-    file = register(await launch(cwd, undefined, ORCHESTRATOR_ARGS)).file;
-    setOrchestrator(cwd, file);
-    await broadcastProjects();
-  }
+  send(socket, { type: "starting" });
+  const { file } = register(await launch(cwd, undefined, ORCHESTRATOR_ARGS));
+  addOrchestrator(cwd, file);
+  await broadcastProjects();
   return start(socket, cwd, file);
 }
 
 /**
- * Remove the orchestrator of the project in `path` from the sidebar, with the sessions of its tasks. Its active tasks are
- * cancelled: their subagents stop, and their worktrees and branches are deleted. The session files stay.
+ * Remove the orchestrator in `file` from the sidebar, with the sessions of its tasks. Its active tasks are cancelled:
+ * their subagents stop, and their worktrees and branches are deleted. The session files stay.
  */
-async function dropOrchestrator(path: string): Promise<void> {
+async function dropOrchestrator(file: string): Promise<void> {
   // From now on, no task tool, task update, or prompt reaches the orchestrator or its tasks.
-  const orchestrator = removeOrchestrator(path);
-  if (!orchestrator) return;
+  const removed = removeOrchestrator(file);
+  if (!removed) return;
+  const { path, orchestrator } = removed;
   const files = [orchestrator.file, ...orchestrator.tasks.flatMap((task) => task.file ?? [])];
   for (const [socket, viewed] of views) {
     if (!files.includes(viewed)) continue;
@@ -476,8 +465,8 @@ async function taskChanges(task: Task): Promise<Changes> {
 /** Send the task update `text` to the orchestrator of `task`. The update starts a turn of the orchestrator. */
 async function notify(path: string, task: Task, update: Task, text: string): Promise<void> {
   // The project or the orchestrator of the task can be gone.
-  const orchestrator = getOrchestrator(path);
-  if (!orchestrator?.tasks.includes(task)) return;
+  const orchestrator = getOrchestrators(path).find((item) => item.tasks.includes(task));
+  if (!orchestrator) return;
   const session = await open(path, orchestrator.file);
   const details = { id: update.id, title: update.title, status: update.status, note: update.note };
   // Pi runs an extension command at once, also during a run. The extension delivers the update when the run ends.
@@ -539,10 +528,10 @@ type ToolParams = {
 
 /** Run the task tool `name` for the orchestrator in `file`. Returns the text for the model. */
 async function runTool(file: string, name: string, params: unknown): Promise<string> {
-  const path = orchestratorPath(file);
-  if (!path) throw new Error("Only the orchestrator of a project can use the task tools.");
+  const found = findOrchestrator(file);
+  if (!found) throw new Error("Only an orchestrator can use the task tools.");
   try {
-    return await taskTool(path, getOrchestrator(path)!, name, params as ToolParams);
+    return await taskTool(found.path, found.orchestrator, name, params as ToolParams);
   } finally {
     saveTasks();
     broadcast(tasksMessage());
@@ -673,21 +662,20 @@ async function handle(socket: WebSocket, message: ClientMessage): Promise<void> 
     case "transcribe":
       return send(socket, { type: "transcript", text: await transcribe(message.audio, message.mimeType) });
     case "start":
-    case "orchestrator":
-    case "new_orchestrator": {
+    case "orchestrator": {
       const run = (starting.get(socket) ?? Promise.resolve()).then(() =>
-        message.type === "start"
-          ? start(socket, message.cwd, message.file)
-          : startOrchestrator(socket, message.cwd, message.type === "new_orchestrator"),
+        message.type === "start" ? start(socket, message.cwd, message.file) : startOrchestrator(socket, message.cwd),
       );
       starting.set(socket, run.catch(() => {}));
       return run;
     }
     case "remove_project":
-      await dropOrchestrator(message.path);
+      await Promise.all(getOrchestrators(message.path).map((orchestrator) => dropOrchestrator(orchestrator.file)));
       removeProject(message.path);
       return broadcastProjects();
     case "remove_session":
+      // An orchestrator goes with its tasks.
+      if (findOrchestrator(message.file)) return dropOrchestrator(message.file);
       removeSession(message.file);
       // The pages that show the session go back to the start screen.
       for (const [viewer, viewed] of views) {

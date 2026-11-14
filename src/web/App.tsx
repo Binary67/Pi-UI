@@ -113,7 +113,7 @@ export function App() {
   /** True when the sidebar shows as a drawer over the page, on a narrow screen. */
   const [drawer, setDrawer] = useState(false);
   const [statuses, setStatuses] = useState<Record<string, SessionStatus>>({});
-  /** The tasks of each orchestrator, by project path. */
+  /** The tasks of each orchestrator, by the session file of the orchestrator. */
   const [tasks, setTasks] = useState<Record<string, TaskSummary[]>>({});
   /** True when the task board shows as a drawer, on a medium or narrow screen. */
   const [board, setBoard] = useState(false);
@@ -321,31 +321,36 @@ export function App() {
     send({ type: "start", cwd: path.trim(), file });
   }
 
+  /** Start a new orchestrator in the project in `path`. The other orchestrators of the project stay. */
   function startOrchestrator(path: string) {
     setErrors([]);
     setDrawer(false);
+    setBoard(false);
     send({ type: "orchestrator", cwd: path.trim() });
   }
 
-  /** True when the project in `path` has no running task and no task in review, or the user agrees to lose their work. */
-  function confirmDrop(path: string): boolean {
-    const active = (tasks[path] ?? []).some((task) => task.status === "running" || task.status === "review");
+  /**
+   * True when the orchestrators in `files` have no running task and no task in review, or the user agrees to lose their
+   * work.
+   */
+  function confirmDrop(files: string[]): boolean {
+    const active = files.some((file) =>
+      (tasks[file] ?? []).some((task) => task.status === "running" || task.status === "review"),
+    );
     return (
       !active ||
       confirm("Tasks of the orchestrator are still running or in review. Their unmerged work will be lost. Continue?")
     );
   }
 
-  /** Replace the orchestrator of the project in `path`. The old one and the sessions of its tasks leave the sidebar. */
-  function newOrchestrator(path: string) {
-    if (!confirmDrop(path)) return;
-    setErrors([]);
-    setBoard(false);
-    send({ type: "new_orchestrator", cwd: path });
+  /** Remove the orchestrator in `file`. It and the sessions of its tasks leave the sidebar. */
+  function removeOrchestrator(file: string) {
+    if (confirmDrop([file])) send({ type: "remove_session", file });
   }
 
-  function removeProject(path: string) {
-    if (confirmDrop(path)) send({ type: "remove_project", path });
+  function removeProject(project: Project) {
+    if (!confirmDrop(project.orchestrators.map((item) => item.file))) return;
+    send({ type: "remove_project", path: project.path });
   }
 
   /** Show the session in `file`, or go back to it when the page already shows it. */
@@ -481,13 +486,17 @@ export function App() {
     }
   }
 
-  const orchestrator = session && projects.find((project) => project.path === session.cwd)?.orchestrator;
-  const projectTasks = (session && tasks[session.cwd]) || [];
+  // The orchestrator that the page shows, or the orchestrator of the subagent session that the page shows.
+  const orchestrator =
+    session &&
+    projects
+      .find((project) => project.path === session.cwd)
+      ?.orchestrators.find(
+        (item) => item.file === session.file || tasks[item.file]?.some((task) => task.file === session.file),
+      );
+  const orchestratorTasks = (orchestrator && tasks[orchestrator.file]) || [];
   // The task board shows with the orchestrator, and with the subagent sessions of its tasks.
-  const showBoard =
-    showChat &&
-    orchestrator &&
-    (orchestrator.file === session.file || projectTasks.some((task) => task.file === session.file));
+  const showBoard = showChat && orchestrator;
 
   return (
     <div className="app">
@@ -527,7 +536,7 @@ export function App() {
                 <span className="project-name">{folderName(project.path)}</span>
               </button>
               {project.path !== session?.cwd && !project.sessions.some((item) => statuses[item.file] === "running") && (
-                <button className="row-action" onClick={() => removeProject(project.path)} title="Remove project">
+                <button className="row-action" onClick={() => removeProject(project)} title="Remove project">
                   <X size={14} />
                 </button>
               )}
@@ -537,21 +546,32 @@ export function App() {
             </div>
             {expanded.has(project.path) && (
               <ul className="sessions">
-                {project.orchestrator && (
-                  <li className={project.orchestrator.file === session?.file ? "session-row active" : "session-row"}>
+                {project.orchestrators.map((item) => (
+                  <li key={item.file} className={item.file === session?.file ? "session-row active" : "session-row"}>
                     <button
                       className="session-open"
-                      onClick={() => openSession(project.path, project.orchestrator!.file)}
-                      title="Orchestrator"
+                      onClick={() => openSession(project.path, item.file)}
+                      title={item.title}
                     >
                       <Workflow size={14} className="session-icon" />
-                      <span className={titleClass(statuses[project.orchestrator.file])}>Orchestrator</span>
+                      <span className={titleClass(statuses[item.file])}>{item.title}</span>
                     </button>
                     <span className="session-status">
-                      {project.orchestrator.unread && <span className="unread-dot" />}
+                      {statuses[item.file] !== "running" && (
+                        <>
+                          <button
+                            className="row-action"
+                            onClick={() => removeOrchestrator(item.file)}
+                            title="Remove orchestrator"
+                          >
+                            <X size={14} />
+                          </button>
+                          {item.unread && <span className="unread-dot" />}
+                        </>
+                      )}
                     </span>
                   </li>
-                )}
+                ))}
                 {project.sessions.map((item) => {
                   const active = item.file === session?.file;
                   const status = statuses[item.file];
@@ -607,7 +627,7 @@ export function App() {
               </button>
             )}
             {showChat && orchestrator?.file === session.file && (
-              <button className="icon-button" onClick={() => newOrchestrator(session.cwd)} title="New orchestrator">
+              <button className="icon-button" onClick={() => startOrchestrator(session.cwd)} title="New orchestrator">
                 <Workflow size={18} />
               </button>
             )}
@@ -793,7 +813,7 @@ export function App() {
 
       {showBoard && (
         <TaskBoard
-          tasks={projectTasks}
+          tasks={orchestratorTasks}
           active={session.file}
           open={board}
           onOpen={(file) => openSession(session.cwd, file)}
