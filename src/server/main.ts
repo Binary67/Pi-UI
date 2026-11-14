@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { type WebSocket, WebSocketServer } from "ws";
 import { applyEvent, type ChatState, emptyChatState } from "../shared/chat-state.ts";
+import type { AgentMessage, SessionEntry } from "../shared/pi-rpc.ts";
 import type { ClientMessage, FolderListing, ModelRef, ServerMessage, SessionInfo } from "../shared/protocol.ts";
 import { PiProcess } from "./pi-process.ts";
 import {
@@ -147,12 +148,19 @@ async function launch(cwd: string, file?: string): Promise<Session> {
     },
   );
   const state = await pi.send({ type: "get_state" });
-  const history = await pi.send({ type: "get_messages" });
+  // Unlike `get_messages`, the entries keep the messages before a compaction. The active branch goes from the leaf back
+  // to the first entry.
+  const { data } = await pi.send({ type: "get_entries" });
+  const byId = new Map<string | null, SessionEntry>(data.entries.map((entry) => [entry.id, entry]));
+  const messages: AgentMessage[] = [];
+  for (let entry = byId.get(data.leafId); entry; entry = byId.get(entry.parentId)) {
+    if (entry.type === "message") messages.push(entry.message!);
+  }
   session = {
     cwd,
     file: state.data.sessionFile!,
     pi,
-    state: { ...emptyChatState, messages: history.data.messages },
+    state: { ...emptyChatState, messages: messages.reverse() },
     info: await readInfo(pi),
   };
   return session;

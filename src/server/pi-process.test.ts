@@ -22,7 +22,7 @@ test("missing Pi rejects current and subsequent commands without crashing or ins
     await rm(dir, { recursive: true, force: true });
   });
   await assert.rejects(pi.send({ type: "get_state" }), /Could not start Pi:.*PATH/);
-  await assert.rejects(pi.send({ type: "get_messages" }), /Could not start Pi:.*PATH/);
+  await assert.rejects(pi.send({ type: "get_entries" }), /Could not start Pi:.*PATH/);
   assert.equal(pi.exited, true);
   assert.equal(pi.busy, false);
   await pi.stop();

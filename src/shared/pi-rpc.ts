@@ -64,6 +64,9 @@ export type JsonAgentSessionEvent =
         | "extension_error";
     };
 
+/** An entry of the session file. Only a `message` entry has `message`. */
+export type SessionEntry = { type: string; id: string; parentId: string | null; message?: AgentMessage };
+
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 type Model = { provider: string; id: string };
 
@@ -79,7 +82,7 @@ export type RpcCommand = (
   | { type: "abort" }
   | { type: "clear_queue" }
   | { type: "get_state" }
-  | { type: "get_messages" }
+  | { type: "get_entries" }
   | { type: "get_available_models" }
   | { type: "get_available_thinking_levels" }
   | { type: "get_session_stats" }
@@ -98,7 +101,7 @@ export type RpcResponse =
       | { command: "abort" }
       | { command: "clear_queue"; data: { steering: string[]; followUp: string[] } }
       | { command: "get_state"; data: RpcSessionState }
-      | { command: "get_messages"; data: { messages: AgentMessage[] } }
+      | { command: "get_entries"; data: { entries: SessionEntry[]; leafId: string | null } }
       | { command: "get_available_models"; data: { models: Model[] } }
       | { command: "get_available_thinking_levels"; data: { levels: ThinkingLevel[] } }
       | { command: "get_session_stats"; data: SessionStats }
