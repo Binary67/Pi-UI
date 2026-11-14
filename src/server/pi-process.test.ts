@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -29,7 +29,8 @@ test("missing Pi rejects current and subsequent commands without crashing or ins
 });
 
 test("the PATH executable receives RPC/session args and handles framing, correlation, dialogs, and shutdown", { timeout: 5000 }, async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), "pi-ui-fake-pi-"));
+  // On macOS, the temp folder is a symlink. Pi reports the real path as its cwd.
+  const dir = await realpath(await mkdtemp(join(tmpdir(), "pi-ui-fake-pi-")));
   const sessionFile = join(dir, "session.jsonl");
   await writeFile(join(dir, "pi"), `#!${process.execPath}
 const args = process.argv.slice(2);
