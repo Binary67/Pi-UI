@@ -45,6 +45,10 @@ const ALLOWED_ORIGINS = new Set([
   "http://127.0.0.1:5173",
   ...(REMOTE_URL ? [new URL(REMOTE_URL).origin] : []),
 ]);
+// The Azure OpenAI deployment for voice input, from `.env`: its full Target URI and its API key. Only the server uses
+// the key, so remote devices never see it.
+const TRANSCRIBE_URL = process.env.PI_UI_TRANSCRIBE_URL;
+const TRANSCRIBE_KEY = process.env.PI_UI_TRANSCRIBE_KEY;
 
 // An idle session that no page shows stays warm this long, so it opens again at once. Then its Pi process stops.
 const WARM_MS = 10 * 60 * 1000;
@@ -504,6 +508,21 @@ async function listFolders(path: string): Promise<FolderListing> {
   };
 }
 
+/** The text of a voice recording: base64 `audio` of the type `mimeType`. The Azure deployment makes the transcript. */
+async function transcribe(audio: string, mimeType: string): Promise<string> {
+  if (!TRANSCRIBE_URL || !TRANSCRIBE_KEY) {
+    throw new Error("For voice input, set PI_UI_TRANSCRIBE_URL and PI_UI_TRANSCRIBE_KEY in .env and restart the servers.");
+  }
+  // Azure checks that the extension of the file name matches the type: `audio/webm;codecs=opus` is `audio.webm`.
+  const type = mimeType.split(";")[0];
+  const form = new FormData();
+  form.append("file", new Blob([Buffer.from(audio, "base64")], { type }), `audio.${type.split("/")[1]}`);
+  const response = await fetch(TRANSCRIBE_URL, { method: "POST", headers: { "api-key": TRANSCRIBE_KEY }, body: form });
+  if (!response.ok) throw new Error(`Transcription failed with status ${response.status}: ${await response.text()}`);
+  const { text } = (await response.json()) as { text: string };
+  return text;
+}
+
 // The starts of a page run one at a time, in order. Quick clicks then end on the session that the user chose last.
 const starting = new Map<WebSocket, Promise<void>>();
 
@@ -513,6 +532,8 @@ async function handle(socket: WebSocket, message: ClientMessage): Promise<void> 
       return send(socket, { type: "pong" });
     case "list_folders":
       return send(socket, { type: "folders", listing: await listFolders(message.path) });
+    case "transcribe":
+      return send(socket, { type: "transcript", text: await transcribe(message.audio, message.mimeType) });
     case "start":
     case "orchestrator": {
       const run = (starting.get(socket) ?? Promise.resolve()).then(() =>

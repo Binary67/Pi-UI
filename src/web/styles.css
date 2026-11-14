@@ -1301,6 +1301,32 @@ textarea::placeholder {
   scrollbar-width: none;
 }
 
+/* The voice input button, left of the send button. It turns red during a recording. */
+.mic {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  color: var(--text-2);
+  background: transparent;
+  border-radius: 50%;
+  transition: background 0.15s, color 0.15s;
+}
+
+.mic:hover:not(:disabled) {
+  background: var(--surface);
+}
+
+.mic.recording {
+  color: #ffffff;
+  background: var(--danger);
+}
+
+.mic.recording:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 88%, black);
+}
+
 .send {
   position: relative;
   display: grid;
@@ -1934,6 +1960,7 @@ textarea::placeholder {
     padding: 7px 10px;
   }
 
+  .mic,
   .send {
     width: 40px;
     height: 40px;

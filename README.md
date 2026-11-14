@@ -76,6 +76,28 @@ the internet. To limit which devices and users can open the URL, use Tailscale
 access controls. The URL stays the same unless you rename this Mac or your
 tailnet. This Mac must stay awake, with both servers running.
 
+## Voice input
+
+The microphone button in the composer records your voice. A second tap stops the
+recording. The server sends the audio to an Azure OpenAI `gpt-4o-transcribe`
+deployment, and the text goes to the end of the composer. It does not send.
+
+Put the deployment in `.env`:
+
+```bash
+PI_UI_TRANSCRIBE_URL=https://<resource>.openai.azure.com/openai/deployments/<deployment>/audio/transcriptions?api-version=2025-03-01-preview
+PI_UI_TRANSCRIBE_KEY=<Azure API key>
+```
+
+The URL is the Target URI of the deployment in the Azure portal. Restart both
+servers after a change. Without the variables, the chat shows an error after a
+recording.
+
+Voice input also works from a remote device through the Tailscale HTTPS URL.
+The browser opens the microphone only on a secure page (HTTPS or localhost). The
+key stays on this Mac: only the server calls Azure. Safari can ask again for
+microphone permission.
+
 ## Checks
 
 ```bash

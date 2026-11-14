@@ -39,6 +39,7 @@ import type {
   TaskSummary,
 } from "../shared/protocol.ts";
 import { Banner, MessageView, Skeleton, type ToolResults, WorkGroup, Working } from "./Message.tsx";
+import { MicButton } from "./MicButton.tsx";
 import { Remote } from "./Remote.tsx";
 import { SendButton } from "./SendButton.tsx";
 import { SessionFooter } from "./SessionFooter.tsx";
@@ -124,6 +125,8 @@ export function App() {
   const [errors, setErrors] = useState<string[]>([]);
   const [text, setText] = useState("");
   const [images, setImages] = useState<PromptImage[]>([]);
+  /** True while the page waits for the transcript of a voice recording. */
+  const [transcribing, setTranscribing] = useState(false);
   const [atBottom, setAtBottom] = useState(true);
   const running = session?.state.running ?? false;
   const showChat = session && !picking && !loading;
@@ -203,9 +206,14 @@ export function App() {
           case "restore":
             setText((current) => [data.text, current].filter((part) => part.trim()).join("\n\n"));
             break;
+          case "transcript":
+            setText((current) => [current, data.text].filter((part) => part.trim()).join(" "));
+            setTranscribing(false);
+            break;
           case "error":
             setErrors((current) => [...current, data.message]);
             setLoading(false);
+            setTranscribing(false);
             break;
         }
       };
@@ -229,6 +237,8 @@ export function App() {
       socketRef.current = null;
       setConnected(false);
       setLoading(false);
+      // The transcript of a recording is lost with the socket.
+      setTranscribing(false);
       timer = setTimeout(connect, delay);
       delay = Math.min(delay * 2, RECONNECT_MAX_MS);
     }
@@ -651,6 +661,20 @@ export function App() {
                     placeholder="Message Pi…"
                     rows={1}
                     autoFocus={!TOUCH}
+                  />
+                  <MicButton
+                    disabled={!connected}
+                    transcribing={transcribing}
+                    onRecord={(audio, mimeType) => {
+                      // `send` drops a message without an open socket. The recording can end after the socket closed.
+                      if (!socketRef.current) {
+                        setErrors((current) => [...current, "Not connected. The recording is lost."]);
+                        return;
+                      }
+                      setTranscribing(true);
+                      send({ type: "transcribe", audio, mimeType });
+                    }}
+                    onError={(message) => setErrors((current) => [...current, message])}
                   />
                   <SendButton
                     running={connected && running}

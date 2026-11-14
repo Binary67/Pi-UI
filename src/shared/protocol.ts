@@ -47,6 +47,8 @@ export type ClientMessage =
   | { type: "remove_session"; file: string }
   /** List the subfolders of `path`, or of the home folder when `path` is empty. */
   | { type: "list_folders"; path: string }
+  /** Ask for the text of a voice recording. `audio` is base64 data without a `data:` URL prefix. */
+  | { type: "transcribe"; audio: string; mimeType: string }
   /** Ask for a `pong`, to check that the connection is alive. */
   | { type: "ping" };
 
@@ -98,6 +100,8 @@ export type ServerMessage =
   | { type: "info"; file: string; info: SessionInfo }
   /** The text of the queued messages that an abort removed, for the composer. */
   | { type: "restore"; text: string }
+  /** The text of the voice recording of a `transcribe` message, for the composer. */
+  | { type: "transcript"; text: string }
   /** The answer to a `ping`. */
   | { type: "pong" }
   | { type: "error"; message: string };
