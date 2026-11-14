@@ -222,12 +222,14 @@ async function launch(cwd: string, file?: string, args: string[] = [], dir = cwd
     [...(file ? ["--session", file] : []), ...args],
     (event) => {
       if (!session) return;
-      session.state = applyEvent(session.state, event);
-      sendToViewers(session.file, { type: "event", file: session.file, event });
+      const previous = session.state;
+      session.state = applyEvent(previous, event);
+      // The page needs only the events that change the chat.
+      if (session.state !== previous) sendToViewers(session.file, { type: "event", file: session.file, event });
       // Pi saves the session file when the first user message ends. From then on, the sidebar can list it. An
-      // orchestrator has its own row in the sidebar.
-      if (event.type === "message_end" && event.message.role === "user" && !findOrchestrator(session.file)) {
-        keepSession(session.cwd, session.file);
+      // orchestrator has its own row in the sidebar, and its title comes from the first message.
+      if (event.type === "message_end" && event.message.role === "user") {
+        if (!findOrchestrator(session.file)) keepSession(session.cwd, session.file);
         void broadcastProjects();
       }
       // Only an assistant message or a compaction changes the usage stats. A refresh fails only when the Pi process
@@ -270,34 +272,41 @@ async function launch(cwd: string, file?: string, args: string[] = [], dir = cwd
     },
     (name, params) => runTool(session!.file, name, params),
   );
-  const state = await pi.send({ type: "get_state" });
-  // Unlike `get_messages`, the entries keep the messages before a compaction. The active branch goes from the leaf back
-  // to the first entry.
-  const { data } = await pi.send({ type: "get_entries" });
-  const byId = new Map<string | null, SessionEntry>(data.entries.map((entry) => [entry.id, entry]));
-  const messages: AgentMessage[] = [];
-  for (let entry = byId.get(data.leafId); entry; entry = byId.get(entry.parentId)) {
-    if (entry.type === "message") messages.push(entry.message!);
-    // A message from an extension, such as a task update for the orchestrator.
-    if (entry.type === "custom_message") {
-      const { customType, content, display, details, timestamp } = entry;
-      messages.push({
-        role: "custom",
-        customType: customType!,
-        content: content!,
-        display: display!,
-        details,
-        timestamp: Date.parse(timestamp),
-      });
+  try {
+    const state = await pi.send({ type: "get_state" });
+    // Unlike `get_messages`, the entries keep the messages before a compaction. The active branch goes from the leaf back
+    // to the first entry.
+    const { data } = await pi.send({ type: "get_entries" });
+    const byId = new Map<string | null, SessionEntry>(data.entries.map((entry) => [entry.id, entry]));
+    const messages: AgentMessage[] = [];
+    for (let entry = byId.get(data.leafId); entry; entry = byId.get(entry.parentId)) {
+      if (entry.type === "message") messages.push(entry.message!);
+      // A message from an extension, such as a task update for the orchestrator.
+      if (entry.type === "custom_message") {
+        const { customType, content, display, details, timestamp } = entry;
+        messages.push({
+          role: "custom",
+          customType: customType!,
+          content: content!,
+          display: display!,
+          details,
+          timestamp: Date.parse(timestamp),
+        });
+      }
     }
+    session = {
+      cwd,
+      file: state.data.sessionFile!,
+      pi,
+      state: { ...emptyChatState, messages: messages.reverse() },
+      info: await readInfo(pi),
+    };
+  } catch (error) {
+    // The Pi process stays alive after a failed command. A new open of the file waits for its stop.
+    if (file) stopping.set(file, pi.stop().finally(() => stopping.delete(file)));
+    else void pi.stop();
+    throw error;
   }
-  session = {
-    cwd,
-    file: state.data.sessionFile!,
-    pi,
-    state: { ...emptyChatState, messages: messages.reverse() },
-    info: await readInfo(pi),
-  };
   return session;
 }
 
@@ -530,19 +539,29 @@ async function notify(path: string, task: Task, update: Task, text: string): Pro
 
 // The starts of tasks in progress: the setup, and the start of the subagent.
 const launches = new Map<Task, Promise<void>>();
+// Each start in progress can be aborted. This stops the setup command.
+const aborts = new Map<Task, AbortController>();
 
 /** Start `task` in the background. */
 function startTask(path: string, task: Task): void {
-  launches.set(task, launchTask(path, task).finally(() => launches.delete(task)));
+  const abort = new AbortController();
+  aborts.set(task, abort);
+  launches.set(
+    task,
+    launchTask(path, task, abort.signal).finally(() => {
+      launches.delete(task);
+      aborts.delete(task);
+    }),
+  );
 }
 
 /** Run the setup command of `task` in its worktree. Then start a new subagent session there, with the task prompt. */
-async function launchTask(path: string, task: Task): Promise<void> {
+async function launchTask(path: string, task: Task, signal: AbortSignal): Promise<void> {
   Object.assign(task, { status: "running", started: Date.now(), note: undefined });
   saveTasks();
   broadcast(tasksMessage());
   try {
-    if (task.setup) await runSetup(task.worktree, task.setup);
+    if (task.setup) await runSetup(task.worktree, task.setup, signal);
     // The task can be cancelled during its setup.
     if (task.status !== "running") return;
     // A session records its model, so only a new subagent session gets `--model`.
@@ -564,7 +583,8 @@ async function launchTask(path: string, task: Task): Promise<void> {
 
 /** Stop the subagent of `task`, then delete its worktree and branch. The session moves to the project folder. */
 async function closeTask(path: string, task: Task): Promise<void> {
-  // The worktree stays until the setup and the subagent have ended.
+  // The worktree stays until the setup and the subagent have ended. A running setup command stops now.
+  aborts.get(task)?.abort();
   await launches.get(task);
   if (task.file) await stopSession(task.file);
   await removeWorktree(path, task.worktree, task.branch);
@@ -610,24 +630,32 @@ async function taskTool(path: string, orchestrator: Orchestrator, name: string, 
     await checkRepo(path);
     const conflict = overlap([...tasks.filter(isActive), ...params.tasks]);
     if (conflict) throw new Error(`The owned files overlap: ${conflict}. A file can belong to only one active task.`);
-    const started: Task[] = [];
-    for (const spec of params.tasks) {
-      const id = Math.max(0, ...tasks.map((task) => task.id)) + 1;
+    // Phase 1 makes all worktrees. When one fails, none of the tasks starts.
+    const first = Math.max(0, ...tasks.map((task) => task.id)) + 1;
+    const made: Task[] = [];
+    const undo = () => Promise.all(made.map((task) => removeWorktree(path, task.worktree, task.branch).catch(() => {})));
+    for (const [index, spec] of params.tasks.entries()) {
+      const id = first + index;
       const worktree = join(WORKTREES_DIR, orchestrator.id, `task-${id}`);
       const branch = `pi-ui/${orchestrator.id}/task-${id}`;
-      const base = await addWorktree(path, worktree, branch);
-      // The orchestrator can be removed while the worktree is made. Then nobody owns the new worktree.
-      if (findOrchestrator(orchestrator.file)?.orchestrator !== orchestrator) {
-        await removeWorktree(path, worktree, branch);
-        throw new Error("The orchestrator was removed.");
+      try {
+        const base = await addWorktree(path, worktree, branch);
+        const { contract, setup } = params;
+        made.push({ ...spec, id, status: "running", contract, setup, additions: [], worktree, branch, base });
+      } catch (error) {
+        await undo();
+        throw new Error(`The task "${spec.title}" could not start: ${errorText(error)}`);
       }
-      const { contract, setup } = params;
-      const task: Task = { ...spec, id, status: "running", contract, setup, additions: [], worktree, branch, base };
-      tasks.push(task);
-      started.push(task);
-      startTask(path, task);
     }
-    return `Started: ${started.map((task) => `${task.id}. ${task.title}`).join(", ")}. An update arrives when the run of each task ends.`;
+    // The orchestrator can be removed while the worktrees are made. Then nobody owns them.
+    if (findOrchestrator(orchestrator.file)?.orchestrator !== orchestrator) {
+      await undo();
+      throw new Error("The orchestrator was removed.");
+    }
+    // Phase 2 starts the tasks.
+    tasks.push(...made);
+    for (const task of made) startTask(path, task);
+    return `Started: ${made.map((task) => `${task.id}. ${task.title}`).join(", ")}. An update arrives when the run of each task ends.`;
   }
   if (name === "list_tasks") {
     const lines = tasks.map((task) => {
@@ -656,7 +684,6 @@ async function taskTool(path: string, orchestrator: Orchestrator, name: string, 
         startTask(path, task);
         return `Task ${task.id} starts again, with the added instructions.`;
       }
-      if (task.status === "review") Object.assign(task, { status: "running", started: Date.now(), note: undefined });
       const session = await open(path, task.file);
       await session.pi.send({ type: "prompt", message: params.text, streamingBehavior: params.mode });
       return `Sent to task ${task.id}.`;

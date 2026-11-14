@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { test, type TestContext } from "node:test";
 import {
   addWorktree,
@@ -66,8 +67,8 @@ test("a task branch goes from a new worktree to a merge, then the worktree and t
   const branch = "pi-ui/x/task-1";
   const base = await addWorktree(repo, worktree, branch);
   assert.equal(base, git(repo, "rev-parse", "HEAD").trim());
-  await runSetup(worktree, "mkdir deps && echo ok > deps/lib.txt");
-  await assert.rejects(runSetup(worktree, "echo missing >&2; exit 3"), /The setup command failed: missing/);
+  await runSetup(worktree, "mkdir deps && echo ok > deps/lib.txt", new AbortController().signal);
+  await assert.rejects(runSetup(worktree, "echo missing >&2; exit 3", new AbortController().signal), /The setup command failed: missing/);
 
   await writeFile(join(worktree, "a.txt"), "changed\n");
   await writeFile(join(worktree, "b.txt"), "new\n");
@@ -172,4 +173,22 @@ test("a switch creates a branch and changes to it, and a failed switch gives the
   await switchBranch(dir, "main", false);
   await writeFile(join(dir, "a.txt"), "dirty\n");
   await assert.rejects(switchBranch(dir, "work", false), /would be overwritten/);
+});
+
+test("an aborted setup command rejects fast, and its child processes are killed", async (t) => {
+  const dir = await fixture(t);
+  const abort = new AbortController();
+  const started = Date.now();
+  const run = runSetup(dir, "sleep 30 & echo $! > child.pid; wait", abort.signal);
+  const rejected = assert.rejects(run);
+  const pidFile = join(dir, "child.pid");
+  while (!existsSync(pidFile) || !(await readFile(pidFile, "utf8")).trim()) await sleep(10);
+  const pid = Number((await readFile(pidFile, "utf8")).trim());
+  abort.abort();
+  await rejected;
+  assert.ok(Date.now() - started < 1000);
+  await sleep(50);
+  assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+  // A signal that is aborted already stops the command at once.
+  await assert.rejects(runSetup(dir, "sleep 30", abort.signal));
 });

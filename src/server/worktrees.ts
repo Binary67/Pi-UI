@@ -1,11 +1,11 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { readdir, rm } from "node:fs/promises";
 import { join, sep } from "node:path";
 import { promisify } from "node:util";
 import type { BranchInfo } from "../shared/protocol.ts";
 
 const exec = promisify(execFile);
-// Diffs and the output of a setup command can be long.
+// Diffs can be long.
 const MAX_BUFFER = 64 * 1024 * 1024;
 // The error of a failed setup command keeps only the end of its output.
 const OUTPUT_LIMIT = 2000;
@@ -61,18 +61,38 @@ export async function switchBranch(dir: string, branch: string, create: boolean)
   }
 }
 
-/** Run the shell command `command` in `dir`. A failure reports the end of the output. */
-export async function runSetup(dir: string, command: string): Promise<void> {
-  const run = exec("/bin/sh", ["-c", command], { cwd: dir, maxBuffer: MAX_BUFFER });
-  // Nobody can answer a question of the command.
-  run.child.stdin?.end();
-  try {
-    await run;
-  } catch (error) {
-    const { stdout = "", stderr = "", message } = error as { stdout?: string; stderr?: string; message: string };
-    const output = `${stdout}${stderr}`.trim() || message;
-    throw new Error(`The setup command failed: ${output.length > OUTPUT_LIMIT ? `…${output.slice(-OUTPUT_LIMIT)}` : output}`);
-  }
+/**
+ * Run the shell command `command` in `dir`. A failure reports the end of the output. When `signal` aborts, the command
+ * and all its child processes are killed.
+ */
+export function runSetup(dir: string, command: string, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    // Nobody can answer a question of the command, so it gets no stdin. It leads its own process group.
+    const child = spawn("/bin/sh", ["-c", command], { cwd: dir, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+    let output = "";
+    const collect = (chunk: Buffer) => {
+      output = (output + chunk).slice(-OUTPUT_LIMIT - 1);
+    };
+    child.stdout.on("data", collect);
+    child.stderr.on("data", collect);
+    const abort = () => {
+      try {
+        process.kill(-child.pid!, "SIGKILL");
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+      }
+      reject(new Error("The setup command was stopped."));
+    };
+    if (signal.aborted) abort();
+    else signal.addEventListener("abort", abort, { once: true });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      signal.removeEventListener("abort", abort);
+      if (code === 0) return resolve();
+      const text = output.trim() || `The command exited with code ${code}.`;
+      reject(new Error(`The setup command failed: ${text.length > OUTPUT_LIMIT ? `…${text.slice(-OUTPUT_LIMIT)}` : text}`));
+    });
+  });
 }
 
 /** Commit all changes in the worktree `dir` with `message`. Returns false when there was nothing to commit. */
