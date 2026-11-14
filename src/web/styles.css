@@ -248,6 +248,7 @@ textarea::placeholder {
 }
 
 .sidebar-heading .row-action,
+.project-row .new-session,
 .project-row:hover .row-action,
 .session-row:hover .row-action,
 .row-action:focus-visible {

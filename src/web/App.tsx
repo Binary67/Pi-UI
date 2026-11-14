@@ -392,9 +392,6 @@ export function App() {
                 {expanded.has(project.path) ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                 <span className="project-name">{folderName(project.path)}</span>
               </button>
-              <button className="row-action" onClick={() => start(project.path)} title="New session">
-                <SquarePen size={14} />
-              </button>
               {project.path !== session?.cwd && !project.sessions.some((item) => statuses[item.file] === "running") && (
                 <button
                   className="row-action"
@@ -404,6 +401,9 @@ export function App() {
                   <X size={14} />
                 </button>
               )}
+              <button className="row-action new-session" onClick={() => start(project.path)} title="New session">
+                <SquarePen size={14} />
+              </button>
             </div>
             {expanded.has(project.path) && (
               <ul className="sessions">
