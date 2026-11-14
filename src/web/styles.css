@@ -663,6 +663,175 @@ textarea::placeholder {
   transform-origin: top right;
 }
 
+/* Dashboard page: it uses the layout of the settings page, with a wider column. */
+
+.dashboard-inner {
+  max-width: 800px;
+}
+
+.dashboard-subtitle {
+  margin: 6px 0 0;
+  font-size: 14px;
+  color: var(--text-2);
+}
+
+.dashboard-cards {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.metric-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 12px 14px;
+  text-align: left;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.metric-card:hover {
+  background: var(--surface);
+}
+
+.metric-card.active {
+  background: var(--surface);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.metric-label {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.metric-value {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.metric-sub {
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--text-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metric-skeleton {
+  height: 82px;
+  border-radius: 12px;
+}
+
+.chart-skeleton {
+  height: 260px;
+  border-radius: 12px;
+}
+
+.dashboard-chart {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.dashboard-chart h2 {
+  margin: 0 0 16px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* The bars share the width. The day card is positioned in this box, so it stays inside the chart. */
+.dashboard-bars {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 180px;
+}
+
+.dashboard-bar {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-width: 0;
+  height: 100%;
+  border-radius: 3px;
+}
+
+.dashboard-bar:hover,
+.dashboard-bar:focus {
+  background: var(--surface);
+  outline: none;
+}
+
+.dashboard-fill {
+  min-height: 2px;
+  background: var(--accent);
+  border-radius: 3px 3px 0 0;
+  transition: height 0.2s;
+}
+
+.dashboard-fill.empty {
+  height: 2px;
+  background: var(--border);
+}
+
+.dashboard-card {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  z-index: 1;
+  width: 220px;
+  padding: 12px 14px;
+  font-size: 13px;
+  color: var(--text-2);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+  transform: translateY(4px);
+  transition: opacity 0.15s, transform 0.15s, visibility 0.15s;
+}
+
+.dashboard-bar.left .dashboard-card {
+  left: 0;
+}
+
+.dashboard-bar.right .dashboard-card {
+  right: 0;
+}
+
+.dashboard-bar:hover .dashboard-card,
+.dashboard-bar:focus .dashboard-card {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+}
+
+.dashboard-card-date {
+  margin-bottom: 4px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.dashboard-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
 /* Thread */
 
 .thread {
@@ -2024,6 +2193,18 @@ textarea::placeholder {
 
   .settings {
     padding: 32px 16px;
+  }
+
+  .dashboard-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboard-chart {
+    padding: 12px;
+  }
+
+  .dashboard-bars {
+    gap: 2px;
   }
 
   /* The cost shows in the usage card, so the model name has more space. */

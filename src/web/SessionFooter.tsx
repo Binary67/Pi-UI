@@ -7,7 +7,7 @@ const WARN_PERCENT = 70;
 const DANGER_PERCENT = 90;
 
 /** A token count in the TUI footer format: 950, 6.8k, 68k, 1.2M. */
-function formatTokens(count: number): string {
+export function formatTokens(count: number): string {
   if (count < 1000) return String(count);
   if (count < 10_000) return `${(count / 1000).toFixed(1)}k`;
   if (count < 1_000_000) return `${Math.round(count / 1000)}k`;
