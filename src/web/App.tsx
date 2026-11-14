@@ -21,8 +21,10 @@ import {
   type FormEvent,
   type KeyboardEvent,
   type ReactNode,
+  useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -402,12 +404,16 @@ export function App() {
   }
 
   // As with the TUI `/fork`, the text and images of the message replace the composer content.
-  function fork(timestamp: number, forkText: string, forkImages: PromptImage[]) {
-    if (!session) return;
-    send({ type: "fork", file: session.file, timestamp });
-    setText(forkText);
-    setImages(forkImages);
-  }
+  const sessionFile = session?.file;
+  const fork = useCallback(
+    (timestamp: number, forkText: string, forkImages: PromptImage[]) => {
+      if (!sessionFile) return;
+      send({ type: "fork", file: sessionFile, timestamp });
+      setText(forkText);
+      setImages(forkImages);
+    },
+    [sessionFile],
+  );
 
   // Pasted images become attachments. A paste without images inserts its text as usual.
   function onPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
@@ -435,10 +441,15 @@ export function App() {
     : [];
   // One list, so a streamed message keeps its element when it completes.
   const items = streaming ? [...messages, streaming] : messages;
-  const results: ToolResults = new Map();
-  for (const message of messages) {
-    if (message.role === "toolResult") results.set(message.toolCallId, message);
-  }
+  // The messages array changes only on `message_end`, so the map stays the same while streaming.
+  const sessionMessages = session?.state.messages;
+  const results = useMemo(() => {
+    const map: ToolResults = new Map();
+    for (const message of sessionMessages ?? []) {
+      if (message.role === "toolResult") map.set(message.toolCallId, message);
+    }
+    return map;
+  }, [sessionMessages]);
   const view = (message: AgentMessage, index: number) => (
     <MessageView
       key={index}
@@ -446,7 +457,7 @@ export function App() {
       results={results}
       running={running}
       streaming={message === streaming}
-      onFork={(forkText, forkImages) => fork(message.timestamp, forkText, forkImages)}
+      onFork={fork}
     />
   );
   // Each user message starts a turn. A done turn shows its steps in one collapsed group, then the final answer.
