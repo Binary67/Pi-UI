@@ -219,8 +219,8 @@ async function start(socket: WebSocket, folder: string, file?: string): Promise<
   const cwd = resolve(folder);
   const info = await stat(cwd).catch(() => undefined);
   if (!info?.isDirectory()) throw new Error(`Folder not found: ${folder}`);
-  addProject(cwd);
-  await broadcastProjects();
+  // The sidebar changes only for a new project. Then it shows the project before the session opens.
+  if (addProject(cwd)) await broadcastProjects();
 
   // A session that the sidebar lists can be removed while it opens.
   const listed = file !== undefined && isKept(file);

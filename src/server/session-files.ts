@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { AgentMessage } from "../shared/pi-rpc.ts";
 
@@ -43,11 +43,19 @@ function messageText(message: AgentMessage): string {
     : message.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join(" ");
 }
 
+type SessionListing = { path: string; title: string; modified: number };
+
+// The listing of each file, by path. A file is read again only after its modification time or size changes.
+const listings = new Map<string, { mtimeMs: number; size: number; listing: SessionListing }>();
+
 /** Only inspect files already kept by the UI, without scanning Pi's installation or session directories. */
-export async function listSessions(files: string[]): Promise<{ path: string; title: string; modified: number }[]> {
+export async function listSessions(files: string[]): Promise<SessionListing[]> {
   const sessions = await Promise.all(
     files.map(async (path) => {
       try {
+        const { mtimeMs, size } = await stat(path);
+        const cached = listings.get(path);
+        if (cached?.mtimeMs === mtimeMs && cached.size === size) return cached.listing;
         const { header, entries } = await readSession(path);
         let firstMessage = "";
         let modified = 0;
@@ -57,11 +65,13 @@ export async function listSessions(files: string[]): Promise<{ path: string; tit
           modified = Math.max(modified, message.timestamp);
           if (!firstMessage && message.role === "user") firstMessage = messageText(message);
         }
-        return {
+        const listing = {
           path,
           title: sessionName(entries) ?? (firstMessage || "(no messages)"),
           modified: modified || Date.parse(header.timestamp),
         };
+        listings.set(path, { mtimeMs, size, listing });
+        return listing;
       } catch {
         // Pi's session list also leaves out missing or unreadable files.
         return null;

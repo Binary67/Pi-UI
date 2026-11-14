@@ -30,10 +30,12 @@ function save(): void {
   writeFileSync(FILE, `${JSON.stringify({ projects }, null, 2)}\n`);
 }
 
-export function addProject(path: string): void {
-  if (projects.some((project) => project.path === path)) return;
+/** Add the project folder `path`. Returns true when it was not a project yet. */
+export function addProject(path: string): boolean {
+  if (projects.some((project) => project.path === path)) return false;
   projects = [...projects, { path, sessions: [], unread: [] }];
   save();
+  return true;
 }
 
 export function removeProject(path: string): void {
