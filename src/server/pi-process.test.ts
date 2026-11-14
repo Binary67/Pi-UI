@@ -159,3 +159,29 @@ process.stdin.on("data", (chunk) => {
   assert.deepEqual(first, { type: "queue_update", steering: ["a"], followUp: [] });
   assert.deepEqual(second, { type: "queue_update", steering: ["b"], followUp: [] });
 });
+
+test("stop kills a Pi that ignores stdin EOF after the grace period", { timeout: 5000 }, async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-ui-fake-pi-hang-"));
+  await writeFile(join(dir, "pi"), `#!${process.execPath}
+process.stdin.resume();
+process.stdin.on("end", () => setInterval(() => {}, 1000));
+setInterval(() => {}, 1000);
+`, { mode: 0o755 });
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  let exitCode: number | null | undefined;
+  const path = process.env.PATH;
+  let pi: PiProcess;
+  try {
+    process.env.PATH = dir;
+    pi = new PiProcess(dir, [], () => {}, (code) => { exitCode = code; });
+  } finally {
+    if (path === undefined) delete process.env.PATH;
+    else process.env.PATH = path;
+  }
+  const started = Date.now();
+  await pi.stop(200);
+  assert.ok(Date.now() - started >= 200);
+  assert.equal(exitCode, null);
+  assert.equal(pi.exited, true);
+  await pi.stop(200);
+});
