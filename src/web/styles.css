@@ -288,6 +288,36 @@ textarea::placeholder {
   background: rgb(29 29 31 / 0.09);
 }
 
+/* The chevron of an orchestrator row. A row without task sessions keeps an empty slot, so the icons align. */
+.session-toggle {
+  display: grid;
+  flex: none;
+  place-items: center;
+  align-self: stretch;
+  width: 24px;
+  margin-left: 4px;
+  color: var(--text-3);
+}
+
+.session-toggle:hover {
+  color: var(--text);
+}
+
+.session-toggle + .session-open {
+  padding-left: 4px;
+}
+
+/* The task sessions of an orchestrator, indented under a thin guide line below its chevron. */
+.session-group {
+  margin-left: 15px;
+  padding-left: 4px;
+  border-left: 1px solid var(--border);
+}
+
+.session-group .sessions {
+  margin: 0;
+}
+
 .session-open {
   display: flex;
   flex: 1;
@@ -1964,6 +1994,15 @@ textarea::placeholder {
 
   .session-open {
     padding: 10px;
+  }
+
+  .session-toggle {
+    width: 32px;
+  }
+
+  /* The guide line stays under the center of the wider chevron. */
+  .session-group {
+    margin-left: 19px;
   }
 
   .message-actions {
