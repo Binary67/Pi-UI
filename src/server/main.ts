@@ -29,6 +29,7 @@ import {
   markRead,
   markUnread,
   type Orchestrator,
+  projectPaths,
   removeOrchestrator,
   removeProject,
   removeSession,
@@ -54,6 +55,7 @@ import {
   commitAll,
   diffSince,
   isMerged,
+  removeLeftovers,
   removeWorktree,
   runSetup,
 } from "./worktrees.ts";
@@ -544,6 +546,16 @@ async function closeTask(path: string, task: Task): Promise<void> {
   if (task.file) await moveSession(task.file, path);
 }
 
+/** Run `closeTask`. When it fails, the task goes back to review, so that `cancel_task` can try the cleanup again. */
+async function closeOrBack(path: string, task: Task): Promise<void> {
+  try {
+    await closeTask(path, task);
+  } catch (error) {
+    Object.assign(task, { status: "review", note: `The cleanup failed: ${errorText(error)}. Run cancel_task to try again.` });
+    throw error;
+  }
+}
+
 type TaskSpec = Pick<Task, "title" | "goal" | "files" | "inputs" | "outputs" | "criteria">;
 /** The parameters of the task tools. Pi checks them against the schemas of the extension, so each tool gets its own. */
 type ToolParams = {
@@ -579,6 +591,11 @@ async function taskTool(path: string, orchestrator: Orchestrator, name: string, 
       const worktree = join(WORKTREES_DIR, orchestrator.id, `task-${id}`);
       const branch = `pi-ui/${orchestrator.id}/task-${id}`;
       const base = await addWorktree(path, worktree, branch);
+      // The orchestrator can be removed while the worktree is made. Then nobody owns the new worktree.
+      if (findOrchestrator(orchestrator.file)?.orchestrator !== orchestrator) {
+        await removeWorktree(path, worktree, branch);
+        throw new Error("The orchestrator was removed.");
+      }
       const { contract, setup } = params;
       const task: Task = { ...spec, id, status: "running", contract, setup, additions: [], worktree, branch, base };
       tasks.push(task);
@@ -629,13 +646,13 @@ async function taskTool(path: string, orchestrator: Orchestrator, name: string, 
         throw new Error(`${task.branch} is not merged. Merge it into the current branch of the project first.`);
       }
       Object.assign(task, { status: "done", note: undefined });
-      await closeTask(path, task);
+      await closeOrBack(path, task);
       return `Task ${task.id} is done. Its worktree and branch are deleted.`;
     }
     case "cancel_task": {
       if (!isActive(task)) throw new Error(`Task ${task.id} is already ${task.status}.`);
       task.status = "cancelled";
-      await closeTask(path, task);
+      await closeOrBack(path, task);
       return `Task ${task.id} is cancelled. Its worktree and branch are deleted.`;
     }
   }
@@ -759,6 +776,13 @@ async function handle(socket: WebSocket, message: ClientMessage): Promise<void> 
     }
   }
 }
+
+// Delete the worktrees and branches that no active task owns. No task can start during the sweep.
+await removeLeftovers(
+  WORKTREES_DIR,
+  projectPaths(),
+  allTasks().flatMap(([, tasks]) => tasks.filter(isActive)),
+);
 
 const server = new WebSocketServer({
   host: HOST,

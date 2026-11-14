@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { rm } from "node:fs/promises";
+import { readdir, rm } from "node:fs/promises";
+import { join, sep } from "node:path";
 import { promisify } from "node:util";
 
 const exec = promisify(execFile);
@@ -91,4 +92,40 @@ export async function removeWorktree(path: string, dir: string, branch: string):
   await git(path, ["worktree", "prune"]);
   // The orchestrator can delete a merged branch itself.
   if ((await git(path, ["branch", "--list", branch])).trim()) await git(path, ["branch", "-D", branch]);
+}
+
+/** Delete every entry under `folder` that is not an active worktree and does not contain one. */
+async function removeUnused(folder: string, active: string[]): Promise<void> {
+  const entries = await readdir(folder).catch(() => []);
+  for (const name of entries) {
+    const entry = join(folder, name);
+    if (active.includes(entry)) continue;
+    if (active.some((worktree) => worktree.startsWith(entry + sep))) await removeUnused(entry, active);
+    else await rm(entry, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Delete what no active task owns. Under `root`, that is every entry that is not an active worktree and does not
+ * contain one. In each repository of `paths`, it is every `pi-ui/*` branch that is not an active branch. A path that
+ * fails is reported and skipped.
+ */
+export async function removeLeftovers(
+  root: string,
+  paths: string[],
+  active: { worktree: string; branch: string }[],
+): Promise<void> {
+  await removeUnused(root, active.map((item) => item.worktree));
+  const branches = new Set(active.map((item) => item.branch));
+  for (const path of paths) {
+    try {
+      await git(path, ["worktree", "prune"]);
+      const listed = await git(path, ["branch", "--list", "pi-ui/*", "--format=%(refname:short)"]);
+      for (const branch of listed.split("\n").filter(Boolean)) {
+        if (!branches.has(branch)) await git(path, ["branch", "-D", branch]);
+      }
+    } catch (error) {
+      console.error(`Could not clean up the repository ${path}:`, error);
+    }
+  }
 }
