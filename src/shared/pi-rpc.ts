@@ -13,6 +13,16 @@ export type AssistantMessage = {
   errorMessage?: string;
 };
 
+/** A message from an extension, such as a task update for the orchestrator. Pi sends its content to the model. */
+export type CustomMessage = {
+  role: "custom";
+  customType: string;
+  content: string | (TextContent | ImageContent)[];
+  display: boolean;
+  details?: unknown;
+  timestamp: number;
+};
+
 export type AgentMessage =
   | { role: "user"; content: string | (TextContent | ImageContent)[]; timestamp: number }
   | AssistantMessage
@@ -26,7 +36,8 @@ export type AgentMessage =
       isError: boolean;
       timestamp: number;
     }
-  | { role: "system" | "bashExecution" | "custom" | "branchSummary" | "compactionSummary"; timestamp: number };
+  | CustomMessage
+  | { role: "system" | "bashExecution" | "branchSummary" | "compactionSummary"; timestamp: number };
 
 type StreamUpdate =
   | { type: "text_start" | "thinking_start"; contentIndex: number }
@@ -40,11 +51,12 @@ export type JsonAgentSessionEvent =
   | { type: "message_start" | "message_end"; message: AgentMessage }
   | { type: "message_update"; assistantMessageEvent: StreamUpdate }
   | { type: "queue_update"; steering: string[]; followUp: string[] }
+  /** `aborted` is true when the run ended because it was aborted. */
+  | { type: "agent_settled"; aborted: boolean }
   | {
       type:
         | "agent_start"
         | "agent_end"
-        | "agent_settled"
         | "turn_start"
         | "turn_end"
         | "tool_execution_start"
@@ -64,8 +76,15 @@ export type JsonAgentSessionEvent =
         | "extension_error";
     };
 
-/** An entry of the session file. Only a `message` entry has `message`. */
-export type SessionEntry = { type: string; id: string; parentId: string | null; message?: AgentMessage };
+/** An entry of the session file. Only a `message` entry has `message`. A `custom_message` entry has the fields of a
+ * custom message, with an ISO `timestamp`. */
+export type SessionEntry = {
+  type: string;
+  id: string;
+  parentId: string | null;
+  timestamp: string;
+  message?: AgentMessage;
+} & Partial<Pick<CustomMessage, "customType" | "content" | "display" | "details">>;
 
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 type Model = { provider: string; id: string };
@@ -109,5 +128,14 @@ export type RpcResponse =
       | { command: "set_thinking_level" }
     ));
 
-export type RpcExtensionUIRequest = { type: "extension_ui_request"; id: string; method: string };
-export type RpcExtensionUIResponse = { type: "extension_ui_response"; id: string; cancelled: true };
+/** An `editor` dialog has a `title` and a `prefill` text. */
+export type RpcExtensionUIRequest = {
+  type: "extension_ui_request";
+  id: string;
+  method: string;
+  title?: string;
+  prefill?: string;
+};
+export type RpcExtensionUIResponse =
+  | { type: "extension_ui_response"; id: string; cancelled: true }
+  | { type: "extension_ui_response"; id: string; value: string };

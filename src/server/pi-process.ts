@@ -9,6 +9,11 @@ import type {
 } from "../shared/pi-rpc.ts";
 
 const DIALOG_METHODS = new Set(["select", "confirm", "input", "editor"]);
+// The orchestrator extension sends its requests as editor dialogs with this title prefix. See src/orchestrator/extension.ts.
+const REQUEST_PREFIX = "pi-ui:";
+
+/** Handles a request of the orchestrator extension. Returns the text for the model, or throws an error for it. */
+export type RequestHandler = (name: string, params: unknown) => Promise<string>;
 
 type PiRecord = JsonAgentSessionEvent | RpcExtensionUIRequest | RpcResponse;
 type RpcSuccess<T extends RpcCommand> = Extract<RpcResponse, { command: T["type"]; success: true }>;
@@ -18,6 +23,7 @@ export class PiProcess {
   private readonly child: ChildProcessByStdio<Writable, Readable, null>;
   private readonly closed: Promise<void>;
   private readonly pending = new Map<string, { resolve: (response: RpcResponse) => void; reject: (error: Error) => void }>();
+  private readonly onRequest?: RequestHandler;
   private nextId = 0;
   private buffer = "";
   private failure?: Error;
@@ -27,7 +33,9 @@ export class PiProcess {
     args: string[],
     onEvent: (event: JsonAgentSessionEvent) => void,
     onExit: (code: number | null) => void,
+    onRequest?: RequestHandler,
   ) {
+    this.onRequest = onRequest;
     this.child = spawn("pi", ["--mode", "rpc", ...args], { cwd, stdio: ["pipe", "pipe", "inherit"] });
     this.child.on("error", (error) =>
       this.fail(new Error(`Could not start Pi: ${error.message}. Make sure pi is installed and available on PATH.`)),
@@ -95,13 +103,24 @@ export class PiProcess {
       this.pending.get(id)?.resolve(record);
       this.pending.delete(id);
     } else if (record.type === "extension_ui_request") {
-      // The UI has no dialogs yet. Cancel them, so the run does not wait forever.
-      if (DIALOG_METHODS.has(record.method)) {
+      if (this.onRequest && record.method === "editor" && record.title?.startsWith(REQUEST_PREFIX)) {
+        void this.answer(this.onRequest, record.id, record.title.slice(REQUEST_PREFIX.length), record.prefill!);
+      } else if (DIALOG_METHODS.has(record.method)) {
+        // The UI has no dialogs yet. Cancel them, so the run does not wait forever.
         this.write({ type: "extension_ui_response", id: record.id, cancelled: true });
       }
     } else {
       onEvent(record);
     }
+  }
+
+  /** Answer a request of the orchestrator extension with JSON: `{ result }`, or `{ error }`. */
+  private async answer(onRequest: RequestHandler, id: string, name: string, prefill: string): Promise<void> {
+    const value = await onRequest(name, JSON.parse(prefill)).then(
+      (result) => ({ result }),
+      (error: unknown) => ({ error: error instanceof Error ? error.message : String(error) }),
+    );
+    this.write({ type: "extension_ui_response", id, value: JSON.stringify(value) });
   }
 
   private write(record: RpcCommand | RpcExtensionUIResponse): void {

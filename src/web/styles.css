@@ -120,6 +120,11 @@ textarea::placeholder {
   opacity: 1;
 }
 
+.nav-item:not(:disabled):hover {
+  color: var(--text);
+  background: rgb(29 29 31 / 0.06);
+}
+
 .remote {
   position: relative;
   display: flex;
@@ -293,6 +298,12 @@ textarea::placeholder {
   text-align: left;
 }
 
+.session-icon {
+  flex: none;
+  margin-right: 8px;
+  color: var(--text-2);
+}
+
 .session-title {
   min-width: 0;
   overflow: hidden;
@@ -400,6 +411,8 @@ textarea::placeholder {
 .header-actions {
   grid-column: 3;
   justify-self: end;
+  display: flex;
+  gap: 2px;
 }
 
 .icon-button {
@@ -510,6 +523,12 @@ textarea::placeholder {
   list-style: none;
   border: 1px solid var(--border);
   border-radius: 16px;
+}
+
+/* The projects to choose from for an orchestrator. The list is only as tall as its projects. */
+.folders.project-list {
+  height: auto;
+  max-height: 240px;
 }
 
 .folders button {
@@ -1620,6 +1639,201 @@ textarea::placeholder {
   border-radius: 50%;
   box-shadow: var(--shadow);
   transform: translateX(-50%);
+}
+
+/* Task board */
+
+.board {
+  position: sticky;
+  top: 0;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 280px;
+  height: 100dvh;
+  padding: 13px 12px 16px;
+  overflow-y: auto;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+}
+
+.board-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding-left: 4px;
+}
+
+.board-name {
+  flex: 1;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.board-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 13px;
+  color: var(--text-2);
+  border-radius: 8px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.board-link:hover {
+  color: var(--text);
+  background: rgb(29 29 31 / 0.06);
+}
+
+/* The board closes and opens only as a drawer. */
+.board-close,
+.board-button {
+  display: none;
+}
+
+.board-empty {
+  margin: 0;
+  padding: 0 4px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-3);
+}
+
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  padding: 10px 12px;
+  text-align: left;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.card:not(:disabled):hover {
+  box-shadow: var(--shadow);
+}
+
+/* A queued task has no session to open yet. */
+.card:disabled {
+  opacity: 1;
+}
+
+.card.active {
+  border-color: var(--accent);
+}
+
+.card.done,
+.card.cancelled {
+  color: var(--text-2);
+}
+
+.card.cancelled .card-title {
+  text-decoration: line-through;
+}
+
+.card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.card-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.card-activity {
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.card-note {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-2);
+}
+
+.badge {
+  flex: none;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-3);
+  background: rgb(29 29 31 / 0.06);
+  border-radius: 6px;
+}
+
+.badge.running {
+  color: var(--accent);
+  background: rgb(0 102 204 / 0.1);
+}
+
+.badge.review {
+  color: #b36800;
+  background: rgb(255 149 0 / 0.14);
+}
+
+.task-update .badge {
+  margin-left: 2px;
+}
+
+/* Medium and narrow screens: the task board is a drawer from the right, and a button in the header opens it. */
+
+@media (max-width: 1100px) {
+  .board {
+    position: fixed;
+    right: 0;
+    z-index: 30;
+    width: min(300px, 85vw);
+    overscroll-behavior: contain;
+    visibility: hidden;
+    transform: translateX(100%);
+    transition: transform 0.25s ease-out, visibility 0.25s;
+  }
+
+  .board.open {
+    visibility: visible;
+    transform: none;
+  }
+
+  .board-close,
+  .board-button {
+    display: grid;
+  }
+
+  .board-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    background: rgb(0 0 0 / 0.2);
+    touch-action: none;
+    animation: fade-in 0.25s ease-out;
+  }
 }
 
 /* Narrow screen: the sidebar is a drawer over the page, and the menu button in the header opens it. */

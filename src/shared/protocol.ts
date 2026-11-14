@@ -33,6 +33,8 @@ export type SessionInfo = {
 export type ClientMessage =
   /** Show a new session in `cwd`, or the session in `file`. A session that is not live starts in a new Pi process. */
   | { type: "start"; cwd: string; file?: string }
+  /** Show the orchestrator of the project in `cwd`. A project without an orchestrator gets a new one. */
+  | { type: "orchestrator"; cwd: string }
   /** Pi uses `streamingBehavior` only during a run. In an idle session, the prompt starts a run. */
   | { type: "prompt"; file: string; text: string; images: PromptImage[]; streamingBehavior: StreamingBehavior }
   /** Clear the queue, then stop the run. The queued text comes back in a `restore` message. */
@@ -56,7 +58,24 @@ export type SessionSummary = { file: string; title: string; unread: boolean };
 /** A live session runs now, or it is warm: idle, with a Pi process that is ready. */
 export type SessionStatus = "running" | "warm";
 
-export type Project = { path: string; sessions: SessionSummary[] };
+/** The orchestrator session of a project. It is not in `sessions`. */
+export type Project = { path: string; sessions: SessionSummary[]; orchestrator?: { file: string; unread: boolean } };
+
+/** Only one task of an orchestrator at a time is `running` or in `review`. */
+export type TaskStatus = "queued" | "running" | "review" | "done" | "cancelled";
+
+/** A task of an orchestrator, as the task board shows it. */
+export type TaskSummary = {
+  id: number;
+  title: string;
+  status: TaskStatus;
+  /** The session file of the subagent. Absent until the task starts. */
+  file?: string;
+  /** Why the task is in review, such as an error. */
+  note?: string;
+  /** The last tool call of a running task, such as `edit src/app.ts`. */
+  activity?: string;
+};
 
 export type FolderListing = { path: string; parent: string; folders: { name: string; path: string }[] };
 
@@ -71,6 +90,8 @@ export type ServerMessage =
   | { type: "projects"; projects: Project[] }
   /** The status of each live session, by session file. A session that is not in the list is cold. */
   | { type: "status"; sessions: Record<string, SessionStatus> }
+  /** The tasks of each orchestrator in queue order, by project path. */
+  | { type: "tasks"; tasks: Record<string, TaskSummary[]> }
   | { type: "folders"; listing: FolderListing }
   | { type: "event"; file: string; event: JsonAgentSessionEvent }
   /** New model, thinking level, or usage data for the session in `file`. */

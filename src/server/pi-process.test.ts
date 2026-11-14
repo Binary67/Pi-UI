@@ -28,7 +28,7 @@ test("missing Pi rejects current and subsequent commands without crashing or ins
   await pi.stop();
 });
 
-test("the PATH executable receives RPC/session args and handles framing, correlation, dialogs, and shutdown", { timeout: 5000 }, async (t) => {
+test("the PATH executable receives RPC/session args and handles framing, correlation, dialogs, orchestrator requests, and shutdown", { timeout: 5000 }, async (t) => {
   // On macOS, the temp folder is a symlink. Pi reports the real path as its cwd.
   const dir = await realpath(await mkdtemp(join(tmpdir(), "pi-ui-fake-pi-")));
   const sessionFile = join(dir, "session.jsonl");
@@ -54,11 +54,15 @@ process.stdin.on("data", (chunk) => {
       setImmediate(() => {
         process.stdout.write(event.slice(37) + "\\r\\n");
         send({ type: "extension_ui_request", id: "dialog", method: "confirm" });
+        send({ type: "extension_ui_request", id: "bridge", method: "editor", title: "pi-ui:echo", prefill: JSON.stringify({ text: "hi" }) });
         send({ type: "response", command: state.type, id: state.id, success: true, data: { sessionFile: args[3], thinkingLevel: "off", model: { provider: "fixture", id: process.cwd() } } });
       });
     }
     if (command.type === "extension_ui_response" && command.id === "dialog" && command.cancelled) {
       send({ type: "queue_update", steering: [], followUp: ["cancelled"] });
+    }
+    if (command.type === "extension_ui_response" && command.id === "bridge") {
+      send({ type: "queue_update", steering: [command.value], followUp: [] });
     }
     if (command.type === "prompt") send({ type: "response", command: command.type, id: command.id, success: false, error: "Fixture rejection" });
   }
@@ -67,6 +71,8 @@ process.stdin.on("data", (chunk) => {
   const events: JsonAgentSessionEvent[] = [];
   let confirmCancelled!: () => void;
   const cancelled = new Promise<void>((resolve) => { confirmCancelled = resolve; });
+  let confirmAnswered!: () => void;
+  const answered = new Promise<void>((resolve) => { confirmAnswered = resolve; });
   const path = process.env.PATH;
   let exitCode: number | null | undefined;
   let pi: PiProcess;
@@ -74,8 +80,9 @@ process.stdin.on("data", (chunk) => {
     process.env.PATH = dir;
     pi = new PiProcess(dir, ["--session", sessionFile], (event) => {
       events.push(event);
-      if (event.type === "queue_update") confirmCancelled();
-    }, (code) => { exitCode = code; });
+      if (event.type === "queue_update" && event.followUp.length) confirmCancelled();
+      if (event.type === "queue_update" && event.steering.length) confirmAnswered();
+    }, (code) => { exitCode = code; }, async (name, params) => `${name}: ${(params as { text: string }).text}`);
   } finally {
     if (path === undefined) delete process.env.PATH;
     else process.env.PATH = path;
@@ -96,6 +103,8 @@ process.stdin.on("data", (chunk) => {
   assert.ok(event.type === "message_end" && event.message.role === "user");
   assert.equal(event.message.content, "hello\u2028world\u2029".repeat(10000));
   assert.deepEqual(events[1], { type: "queue_update", steering: [], followUp: ["cancelled"] });
+  await answered;
+  assert.deepEqual(events[2], { type: "queue_update", steering: [JSON.stringify({ result: "echo: hi" })], followUp: [] });
   await assert.rejects(pi.send({ type: "prompt", message: "No model request" }), /Fixture rejection/);
   assert.equal(pi.busy, false);
   await pi.stop();

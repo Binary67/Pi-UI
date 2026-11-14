@@ -9,6 +9,7 @@ import {
   FolderOpen,
   GitFork,
   Globe,
+  ListChecks,
   LoaderCircle,
   type LucideIcon,
   Minus,
@@ -24,8 +25,10 @@ import Markdown, { type Components } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 import type { AgentMessage, AssistantMessage } from "../shared/chat-state.ts";
-import type { PromptImage } from "../shared/protocol.ts";
+import type { CustomMessage } from "../shared/pi-rpc.ts";
+import type { PromptImage, TaskSummary } from "../shared/protocol.ts";
 import { ImageViewer } from "./ImageViewer.tsx";
+import { TASK_LABELS } from "./TaskBoard.tsx";
 
 type ToolCall = Extract<AssistantMessage["content"][number], { type: "toolCall" }>;
 type ToolResult = Extract<AgentMessage, { role: "toolResult" }>;
@@ -282,6 +285,29 @@ function UserImages({ images }: { images: PromptImage[] }) {
   );
 }
 
+/** A task update in the orchestrator chat: one row with the task and its status. A click shows the full update. */
+function TaskUpdate({ message }: { message: CustomMessage }) {
+  const [open, setOpen] = useState(false);
+  const { id, title, status } = message.details as Pick<TaskSummary, "id" | "title" | "status">;
+  const text =
+    typeof message.content === "string"
+      ? message.content
+      : message.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("\n");
+  return (
+    <div className="task-update">
+      <button className="disclosure" onClick={() => setOpen(!open)} aria-expanded={open}>
+        <ChevronRight size={14} className="chevron" />
+        <ListChecks size={14} />
+        <span>
+          Task {id} · {title}
+        </span>
+        <span className={`badge ${status}`}>{TASK_LABELS[status]}</span>
+      </button>
+      {open && <div className="thinking-text">{text}</div>}
+    </div>
+  );
+}
+
 type MessageViewProps = {
   message: AgentMessage;
   results: ToolResults;
@@ -322,6 +348,7 @@ export function MessageView({ message, results, running, streaming, onFork }: Me
       </div>
     );
   }
+  if (message.role === "custom") return message.customType === "task_update" ? <TaskUpdate message={message} /> : null;
   if (message.role !== "assistant") return null;
 
   const text = message.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("\n\n");

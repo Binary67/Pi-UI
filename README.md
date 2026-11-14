@@ -30,6 +30,22 @@ Open http://localhost:5173. The backend listens on `127.0.0.1:3001`.
 Your terminal Pi continues to work normally; the UI starts separate processes
 from the same installation. Pi upgrades may require updating this integration.
 
+## Orchestrator
+
+**Orchestrator** in the sidebar opens the orchestrator of a project. Each project has one. You talk to the
+orchestrator. It discusses a plan with you, and after you agree, it puts the tasks in a queue. Subagents do the tasks
+one at a time. Each subagent is a normal session of the project, so you can open it from the sidebar and type in it.
+
+- The task board on the right shows the tasks in queue order. A click on a card opens the session of its task.
+- When a subagent run ends, its task goes to review, and the orchestrator gets a task update. The orchestrator then
+  sends corrections or accepts the task. The next task starts only after the orchestrator accepts or cancels the
+  current one.
+- The orchestrator has only read tools and its task tools. It does not edit files.
+
+The orchestrator loads the Pi extension in `src/orchestrator/extension.ts`, with the instructions in
+`src/orchestrator/orchestrator.md`. Subagents get the instructions in `src/orchestrator/subagent.md`. They tell a
+subagent to skip the discussion step of an `AGENTS.md`, because the user already approved the plan.
+
 ## Remote access with Tailscale
 
 Open the UI from another device in your tailnet, such as a laptop or a phone.
@@ -64,7 +80,7 @@ tailnet. This Mac must stay awake, with both servers running.
 
 ```bash
 npm run typecheck
-node --test src/server/pi-process.test.ts src/server/session-files.test.ts
+node --test src/server/pi-process.test.ts src/server/session-files.test.ts src/server/tasks.test.ts
 ```
 
 The focused tests use temporary files and a fake Pi executable, not real sessions

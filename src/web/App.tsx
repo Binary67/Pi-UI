@@ -7,10 +7,12 @@ import {
   CornerLeftUp,
   Folder,
   FolderPlus,
+  ListTodo,
   Menu,
   Pi,
   Puzzle,
   SquarePen,
+  Workflow,
   X,
 } from "lucide-react";
 import {
@@ -34,11 +36,13 @@ import type {
   SessionSnapshot,
   SessionStatus,
   StreamingBehavior,
+  TaskSummary,
 } from "../shared/protocol.ts";
 import { Banner, MessageView, Skeleton, type ToolResults, WorkGroup, Working } from "./Message.tsx";
 import { Remote } from "./Remote.tsx";
 import { SendButton } from "./SendButton.tsx";
 import { SessionFooter } from "./SessionFooter.tsx";
+import { TaskBoard } from "./TaskBoard.tsx";
 
 /** Distance in pixels from the page bottom that still counts as "at the bottom". */
 const BOTTOM_SLACK = 80;
@@ -86,6 +90,15 @@ function scrollToBottom(behavior: ScrollBehavior): void {
   window.scrollTo({ top: document.documentElement.scrollHeight, behavior });
 }
 
+/** A user message or a task update for the orchestrator starts a turn. */
+function startsTurn(message: AgentMessage): boolean {
+  return message.role === "user" || (message.role === "custom" && message.customType === "task_update");
+}
+
+function titleClass(status: SessionStatus | undefined): string {
+  return status === "running" ? "session-title shimmer" : status ? "session-title" : "session-title cold";
+}
+
 export function App() {
   const socketRef = useRef<WebSocket | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -99,8 +112,13 @@ export function App() {
   /** True when the sidebar shows as a drawer over the page, on a narrow screen. */
   const [drawer, setDrawer] = useState(false);
   const [statuses, setStatuses] = useState<Record<string, SessionStatus>>({});
+  /** The tasks of each orchestrator, by project path. */
+  const [tasks, setTasks] = useState<Record<string, TaskSummary[]>>({});
+  /** True when the task board shows as a drawer, on a medium or narrow screen. */
+  const [board, setBoard] = useState(false);
   const [session, setSession] = useState<SessionSnapshot | null>(null);
-  const [picking, setPicking] = useState(false);
+  /** The start screen shows to choose a folder for a new session, or a project for its orchestrator. */
+  const [picking, setPicking] = useState<false | "session" | "orchestrator">(false);
   // A saved session opens at once. The skeleton shows until it opens, so the welcome screen does not flash.
   const [loading, setLoading] = useState(() => localStorage.getItem(VIEW_KEY) !== null);
   const [errors, setErrors] = useState<string[]>([]);
@@ -165,6 +183,9 @@ export function App() {
             break;
           case "status":
             setStatuses(data.sessions);
+            break;
+          case "tasks":
+            setTasks(data.tasks);
             break;
           case "folders":
             setListing(data.listing);
@@ -290,9 +311,23 @@ export function App() {
     send({ type: "start", cwd: path.trim(), file });
   }
 
-  function addProject() {
+  function startOrchestrator(path: string) {
+    setErrors([]);
+    setDrawer(false);
+    send({ type: "orchestrator", cwd: path.trim() });
+  }
+
+  /** Show the session in `file`, or go back to it when the page already shows it. */
+  function openSession(path: string, file: string) {
+    setBoard(false);
+    if (file !== session?.file) return start(path, file);
+    setPicking(false);
+    setDrawer(false);
+  }
+
+  function pick(mode: "session" | "orchestrator") {
     setCwd("");
-    setPicking(true);
+    setPicking(mode);
     setDrawer(false);
     send({ type: "list_folders", path: "" });
   }
@@ -318,7 +353,8 @@ export function App() {
 
   function onStart(event: FormEvent) {
     event.preventDefault();
-    start(cwd);
+    if (picking === "orchestrator") startOrchestrator(cwd);
+    else start(cwd);
   }
 
   function submit(streamingBehavior: StreamingBehavior) {
@@ -382,9 +418,9 @@ export function App() {
   const thread: ReactNode[] = [];
   for (let start = 0, end = 0; start < items.length; start = end) {
     end = start + 1;
-    while (end < items.length && items[end].role !== "user") end++;
+    while (end < items.length && !startsTurn(items[end])) end++;
     const turn = items.slice(start, end);
-    const first = turn[0].role === "user" ? 1 : 0;
+    const first = startsTurn(turn[0]) ? 1 : 0;
     const last = turn.findLastIndex((message) => message.role === "assistant");
     const final = turn[last];
     if (
@@ -414,6 +450,14 @@ export function App() {
     }
   }
 
+  const orchestrator = session && projects.find((project) => project.path === session.cwd)?.orchestrator;
+  const projectTasks = (session && tasks[session.cwd]) || [];
+  // The task board shows with the orchestrator, and with the subagent sessions of its tasks.
+  const showBoard =
+    showChat &&
+    orchestrator &&
+    (orchestrator.file === session.file || projectTasks.some((task) => task.file === session.file));
+
   return (
     <div className="app">
       <aside className={drawer ? "sidebar open" : "sidebar"}>
@@ -424,6 +468,10 @@ export function App() {
           Pi
         </div>
         <Remote url={remoteUrl} />
+        <button className="nav-item" onClick={() => pick("orchestrator")}>
+          <Workflow size={16} />
+          Orchestrator
+        </button>
         <button className="nav-item" disabled>
           <Puzzle size={16} />
           Plugins
@@ -436,7 +484,7 @@ export function App() {
         </button>
         <div className="sidebar-heading">
           <span className="project-name">Projects</span>
-          <button className="row-action" onClick={addProject} title="Add project">
+          <button className="row-action" onClick={() => pick("session")} title="Add project">
             <FolderPlus size={14} />
           </button>
         </div>
@@ -462,6 +510,21 @@ export function App() {
             </div>
             {expanded.has(project.path) && (
               <ul className="sessions">
+                {project.orchestrator && (
+                  <li className={project.orchestrator.file === session?.file ? "session-row active" : "session-row"}>
+                    <button
+                      className="session-open"
+                      onClick={() => openSession(project.path, project.orchestrator!.file)}
+                      title="Orchestrator"
+                    >
+                      <Workflow size={14} className="session-icon" />
+                      <span className={titleClass(statuses[project.orchestrator.file])}>Orchestrator</span>
+                    </button>
+                    <span className="session-status">
+                      {project.orchestrator.unread && <span className="unread-dot" />}
+                    </span>
+                  </li>
+                )}
                 {project.sessions.map((item) => {
                   const active = item.file === session?.file;
                   const status = statuses[item.file];
@@ -469,20 +532,10 @@ export function App() {
                     <li key={item.file} className={active ? "session-row active" : "session-row"}>
                       <button
                         className="session-open"
-                        onClick={() => {
-                          if (!active) return start(project.path, item.file);
-                          setPicking(false);
-                          setDrawer(false);
-                        }}
+                        onClick={() => openSession(project.path, item.file)}
                         title={item.title}
                       >
-                        <span
-                          className={
-                            status === "running" ? "session-title shimmer" : status ? "session-title" : "session-title cold"
-                          }
-                        >
-                          {item.title}
-                        </span>
+                        <span className={titleClass(status)}>{item.title}</span>
                       </button>
                       <span className="session-status">
                         {status !== "running" && (
@@ -521,6 +574,11 @@ export function App() {
             </span>
           )}
           <div className="header-actions">
+            {showBoard && (
+              <button className="icon-button board-button" onClick={() => setBoard(true)} title="Show tasks">
+                <ListTodo size={18} />
+              </button>
+            )}
             {showChat && (
               <button className="icon-button" onClick={() => start(session.cwd)} title="New session">
                 <SquarePen size={18} />
@@ -615,8 +673,29 @@ export function App() {
         ) : (
           <main className="welcome">
             <div className="welcome-inner">
-              <h1>{greeting()}</h1>
-              <p className="welcome-sub">Choose a project folder to start a session.</p>
+              {picking === "orchestrator" ? (
+                <>
+                  <h1>Orchestrator</h1>
+                  <p className="welcome-sub">Choose a project. Each project has one orchestrator.</p>
+                  {projects.length > 0 && (
+                    <ul className="folders project-list">
+                      {projects.map((project) => (
+                        <li key={project.path}>
+                          <button onClick={() => startOrchestrator(project.path)} title={project.path}>
+                            <Workflow size={16} />
+                            <span>{folderName(project.path)}</span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              ) : (
+                <>
+                  <h1>{greeting()}</h1>
+                  <p className="welcome-sub">Choose a project folder to start a session.</p>
+                </>
+              )}
               <form className="folder-card" onSubmit={onStart}>
                 <Folder size={18} />
                 <input
@@ -663,6 +742,20 @@ export function App() {
           </main>
         )}
       </div>
+
+      {showBoard && (
+        <TaskBoard
+          tasks={projectTasks}
+          active={session.file}
+          open={board}
+          onOpen={(file) => openSession(session.cwd, file)}
+          onClose={() => setBoard(false)}
+          onOrchestrator={
+            orchestrator.file === session.file ? undefined : () => openSession(session.cwd, orchestrator.file)
+          }
+        />
+      )}
+      {showBoard && board && <div className="board-backdrop" onClick={() => setBoard(false)} />}
     </div>
   );
 }
