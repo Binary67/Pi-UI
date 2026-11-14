@@ -207,7 +207,9 @@ function Menu({
 
 /**
  * The microphone of voice input. The choice belongs to this browser, so a run does not block it. The browser gives the
- * names of its microphones only after the page opened a microphone. Until then, the list shows only the saved choice.
+ * names of its microphones only after the page has permission for a microphone. When the menu opens without names, it
+ * opens a microphone for a moment to get the permission. A page load never asks. When the permission fails, the list
+ * shows only the saved choice.
  */
 function MicrophoneMenu() {
   const [saved, setSaved] = useState(savedMicrophone);
@@ -229,6 +231,19 @@ function MicrophoneMenu() {
         )
         .map(({ deviceId, label }) => ({ deviceId, label })),
     );
+    return all;
+  }
+
+  async function open() {
+    const all = await refresh();
+    if (all.some((device) => device.kind === "audioinput" && device.label)) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((track) => track.stop());
+    } catch {
+      return;
+    }
+    await refresh();
   }
 
   useEffect(() => {
@@ -247,7 +262,7 @@ function MicrophoneMenu() {
       items={[{ key: "", label: "System default" }, ...microphones.map(({ label }) => ({ key: label, label }))]}
       selected={saved?.label ?? ""}
       disabled={false}
-      onOpen={() => void refresh()}
+      onOpen={() => void open()}
       onSelect={(key) => {
         const microphone = microphones.find((item) => item.label === key);
         if (microphone) localStorage.setItem(MICROPHONE_KEY, JSON.stringify(microphone));

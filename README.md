@@ -122,7 +122,9 @@ of the microphone.
 
 The microphone menu below the composer sets the microphone for this browser.
 **System default** uses the default microphone of the system. The browser shows
-the names of its microphones only after a first recording in the page.
+the names of its microphones only with permission for the microphone. When you
+open the menu without the names, the browser asks for this permission. The
+microphone turns on for a moment and then off.
 
 When the microphone gives no sound at all, the chat shows an error and does not
 send the recording. There are 2 known causes:
