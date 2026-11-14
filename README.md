@@ -32,10 +32,10 @@ from the same installation. Pi upgrades may require updating this integration.
 
 ## Orchestrator
 
-An orchestrator solves one problem of a project with subagents. **Orchestrator** in the sidebar shows a list of
-projects and a folder field. A choice opens the empty orchestrator of that project when it has one (an orchestrator
-without a message). Otherwise it starts a new orchestrator. For the next problem, start a new orchestrator with a fresh
-context.
+An orchestrator solves one problem of a project with subagents. The workflow button in a project row of the sidebar
+starts the orchestrator of that project. The button opens the empty orchestrator of the project when it has one (an
+orchestrator without a message). Otherwise it starts a new orchestrator. For the next problem, start a new orchestrator
+with a fresh context.
 
 A project can have many orchestrators. The sidebar lists them under the project, newest first, above the sessions, with
 a workflow icon. A row shows "New orchestrator" until the first message of the orchestrator gives it a title.
@@ -123,7 +123,8 @@ During a recording, a waveform left of the button shows the level of your voice.
 When you speak, the bars get taller. The tooltip of the waveform shows the name
 of the microphone.
 
-The microphone menu below the composer sets the microphone for this browser.
+The microphone menu on the Settings page sets the microphone for this browser.
+Open the page with the **Settings** button at the bottom of the sidebar.
 **System default** uses the default microphone of the system. The browser shows
 the names of its microphones only with permission for the microphone. When you
 open the menu without the names, the browser asks for this permission. The

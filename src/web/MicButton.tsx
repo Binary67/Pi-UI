@@ -9,8 +9,8 @@ export const MICROPHONE_KEY = "pi-ui:microphone";
 export type Microphone = { deviceId: string; label: string };
 
 const SILENCE =
-  "The microphone gives no sound. Choose another microphone below the composer, or see Voice input in the README.";
-const NOT_CONNECTED = "The selected microphone is not connected. Choose another microphone below the composer.";
+  "The microphone gives no sound. Choose another microphone in Settings, or see Voice input in the README.";
+const NOT_CONNECTED = "The selected microphone is not connected. Choose another microphone in Settings.";
 
 /** The microphone that the user chose, or undefined for the system default. */
 export function savedMicrophone(): Microphone | undefined {
