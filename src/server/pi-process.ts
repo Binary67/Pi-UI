@@ -25,7 +25,7 @@ export class PiProcess {
   private readonly pending = new Map<string, { resolve: (response: RpcResponse) => void; reject: (error: Error) => void }>();
   private readonly onRequest?: RequestHandler;
   private nextId = 0;
-  private buffer = "";
+  private parts: string[] = [];
   private failure?: Error;
 
   constructor(
@@ -44,14 +44,18 @@ export class PiProcess {
 
     // Split only on LF: JSON strings can contain U+2028 and U+2029, so readline is not safe here.
     this.child.stdout.setEncoding("utf8");
+    // The parts of a partial record are joined once, when its LF arrives. So the work is linear in the size of the data.
     this.child.stdout.on("data", (chunk: string) => {
-      this.buffer += chunk;
+      let start = 0;
       let end: number;
-      while ((end = this.buffer.indexOf("\n")) !== -1) {
-        const line = this.buffer.slice(0, end).replace(/\r$/, "");
-        this.buffer = this.buffer.slice(end + 1);
+      while ((end = chunk.indexOf("\n", start)) !== -1) {
+        this.parts.push(chunk.slice(start, end));
+        const line = this.parts.join("").replace(/\r$/, "");
+        this.parts = [];
+        start = end + 1;
         if (line) this.handleRecord(JSON.parse(line) as PiRecord, onEvent);
       }
+      if (start < chunk.length) this.parts.push(start ? chunk.slice(start) : chunk);
     });
 
     this.closed = new Promise((resolve) => {
