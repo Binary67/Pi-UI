@@ -32,6 +32,7 @@ import {
 } from "react";
 import { type AgentMessage, applyEvent } from "../shared/chat-state.ts";
 import type {
+  BranchInfo,
   ClientMessage,
   FolderListing,
   Project,
@@ -126,6 +127,8 @@ export function App() {
   /** True when the task board shows as a drawer, on a medium or narrow screen. */
   const [board, setBoard] = useState(false);
   const [session, setSession] = useState<SessionSnapshot | null>(null);
+  /** The last `branch` message. It counts only while the page shows the session of its file. */
+  const [branchState, setBranchState] = useState<{ file: string; branch: BranchInfo | null } | null>(null);
   /** The start screen shows to choose a folder for a new session. */
   const [picking, setPicking] = useState(false);
   /** The settings page shows. It replaces the chat and the start screen. */
@@ -212,6 +215,9 @@ export function App() {
             break;
           case "info":
             setSession((current) => (current?.file === data.file ? { ...current, info: data.info } : current));
+            break;
+          case "branch":
+            setBranchState({ file: data.file, branch: data.branch });
             break;
           case "restore":
             setText((current) => [data.text, current].filter((part) => part.trim()).join("\n\n"));
@@ -538,6 +544,27 @@ export function App() {
   // The task board shows with the orchestrator, and with the subagent sessions of its tasks.
   const showBoard = showChat && orchestrator;
 
+  const branch = session && branchState?.file === session.file ? branchState.branch : null;
+  // The texts are the same as the texts of the server.
+  const sessionProject = session && projects.find((item) => item.path === session.cwd);
+  let branchBlock: string | null = null;
+  if (session) {
+    if (Object.values(tasks).some((list) => list.some((task) => task.file === session.file))) {
+      branchBlock = "A task session stays on its task branch.";
+    } else if (
+      sessionProject &&
+      [...sessionProject.sessions, ...sessionProject.orchestrators].some((item) => statuses[item.file] === "running")
+    ) {
+      branchBlock = "A session of this project is running. Wait until it ends.";
+    } else if (
+      sessionProject?.orchestrators.some((item) =>
+        (tasks[item.file] ?? []).some((task) => task.status === "running" || task.status === "review"),
+      )
+    ) {
+      branchBlock = "An orchestrator of this project has tasks that are running or in review. Finish or cancel them first.";
+    }
+  }
+
   /** The row of a session in the sidebar, for a normal session and for a task session of an orchestrator. */
   function sessionRow(project: Project, item: SessionSummary) {
     const status = statuses[item.file];
@@ -818,6 +845,12 @@ export function App() {
                     send({ type: "set_model", file: session.file, provider: model.provider, modelId: model.id })
                   }
                   onSetThinkingLevel={(level) => send({ type: "set_thinking_level", file: session.file, level })}
+                  branch={branch}
+                  branchBlock={branchBlock}
+                  onListBranches={() => send({ type: "list_branches", file: session.file })}
+                  onSwitchBranch={(name, create) =>
+                    send({ type: "switch_branch", file: session.file, branch: name, create })
+                  }
                 />
               </div>
             </div>

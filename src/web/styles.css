@@ -1518,9 +1518,13 @@ textarea::placeholder {
   min-width: 0;
 }
 
-/* The thinking menu keeps its width. Only the model name gets shorter. */
+/* The thinking menu keeps its width. The model name and the branch name get shorter. */
 .menu + .menu {
   flex: none;
+}
+
+.menu + .branch-menu {
+  flex: 0 1 auto;
 }
 
 .pill {
@@ -2025,6 +2029,18 @@ textarea::placeholder {
   /* The cost shows in the usage card, so the model name has more space. */
   .usage-cost {
     display: none;
+  }
+
+  /* The branch name is shorter, and its list ends at the pill, so the list stays on the screen. */
+  .branch-menu .pill-label {
+    max-width: 96px;
+  }
+
+  .branch-menu .menu-panel {
+    right: 0;
+    left: auto;
+    width: min(280px, calc(100vw - 32px));
+    transform-origin: bottom right;
   }
 
   .waveform {

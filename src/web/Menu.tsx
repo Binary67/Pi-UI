@@ -19,6 +19,11 @@ type MenuProps = {
   searchPlaceholder?: string;
   /** Called when the menu opens. */
   onOpen?: () => void;
+  /**
+   * When set, and the search text is not the key of an item, the list ends with an item that creates it.
+   * `label` gives the text of the item from the trimmed search text.
+   */
+  create?: { label: (name: string) => string; onCreate: (name: string) => void };
   onSelect: (key: string) => void;
 };
 
@@ -33,6 +38,7 @@ export function Menu({
   disabled,
   searchPlaceholder,
   onOpen,
+  create,
   onSelect,
 }: MenuProps) {
   const id = useId();
@@ -52,7 +58,10 @@ export function Menu({
   const matches = items.filter((item) =>
     terms.every((term) => `${item.group ?? ""} ${item.label}`.toLowerCase().includes(term)),
   );
-  const activeId = matches.length ? `${id}-${active}` : undefined;
+  const name = query.trim();
+  const showCreate = Boolean(create && name && !items.some((item) => item.key === name));
+  const count = matches.length + (showCreate ? 1 : 0);
+  const activeId = count ? `${id}-${active}` : undefined;
 
   // Focus the menu when it opens. A press outside the menu closes it.
   useEffect(() => {
@@ -87,16 +96,22 @@ export function Menu({
     if (key !== selected) onSelect(key);
   }
 
+  function createItem(refocus: boolean) {
+    close(refocus);
+    create!.onCreate(name);
+  }
+
   function onKeyDown(event: KeyboardEvent) {
     switch (event.key) {
       case "ArrowDown":
       case "ArrowUp":
         event.preventDefault();
-        if (matches.length) setActive((active + (event.key === "ArrowDown" ? 1 : -1) + matches.length) % matches.length);
+        if (count) setActive((active + (event.key === "ArrowDown" ? 1 : -1) + count) % count);
         return;
       case "Enter":
         event.preventDefault();
         if (matches[active]) choose(matches[active].key, true);
+        else if (showCreate) createItem(true);
         return;
       case "Escape":
       case "Tab":
@@ -170,7 +185,20 @@ export function Menu({
                 </div>
               </Fragment>
             ))}
-            {!matches.length && <div className="menu-empty">No matches</div>}
+            {showCreate && (
+              <div
+                id={`${id}-${matches.length}`}
+                className={active === matches.length ? "menu-item active" : "menu-item"}
+                role="option"
+                aria-selected={false}
+                onPointerMove={() => setActive(matches.length)}
+                onClick={() => createItem(false)}
+              >
+                <span className="menu-check" />
+                {create!.label(name)}
+              </div>
+            )}
+            {!count && <div className="menu-empty">No matches</div>}
           </div>
         </div>
       )}
