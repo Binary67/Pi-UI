@@ -528,6 +528,18 @@ export function App() {
     }
     return map;
   }, [sessionMessages]);
+  // The orchestrator that the page shows, or the orchestrator of the subagent session that the page shows.
+  const orchestrator =
+    session &&
+    projects
+      .find((project) => project.path === session.cwd)
+      ?.orchestrators.find(
+        (item) => item.file === session.file || tasks[item.file]?.some((task) => task.file === session.file),
+      );
+  const taskSession =
+    session && Object.values(tasks).some((list) => list.some((task) => task.file === session.file));
+  // The server rejects a fork of an orchestrator or a task session.
+  const canFork = session && orchestrator?.file !== session.file && !taskSession;
   const view = (message: AgentMessage, index: number) => (
     <MessageView
       key={index}
@@ -535,7 +547,7 @@ export function App() {
       results={results}
       running={running}
       streaming={message === streaming}
-      onFork={fork}
+      onFork={canFork ? fork : undefined}
     />
   );
   // Each user message starts a turn. A done turn shows its steps in one collapsed group, then the final answer.
@@ -575,14 +587,6 @@ export function App() {
     }
   }
 
-  // The orchestrator that the page shows, or the orchestrator of the subagent session that the page shows.
-  const orchestrator =
-    session &&
-    projects
-      .find((project) => project.path === session.cwd)
-      ?.orchestrators.find(
-        (item) => item.file === session.file || tasks[item.file]?.some((task) => task.file === session.file),
-      );
   const orchestratorTasks = (orchestrator && tasks[orchestrator.file]) || [];
   // The task board shows with the orchestrator, and with the subagent sessions of its tasks.
   const showBoard = showChat && orchestrator;
@@ -592,7 +596,7 @@ export function App() {
   const sessionProject = session && projects.find((item) => item.path === session.cwd);
   let branchBlock: string | null = null;
   if (session) {
-    if (Object.values(tasks).some((list) => list.some((task) => task.file === session.file))) {
+    if (taskSession) {
       branchBlock = "A task session stays on its task branch.";
     } else if (
       sessionProject &&
@@ -611,6 +615,10 @@ export function App() {
   /** The row of a session in the sidebar, for a normal session and for a task session of an orchestrator. */
   function sessionRow(project: Project, item: SessionSummary) {
     const status = statuses[item.file];
+    // The X of a task session is hidden while its task is running or in review.
+    const activeTask = Object.values(tasks).some((list) =>
+      list.some((task) => task.file === item.file && (task.status === "running" || task.status === "review")),
+    );
     return (
       <li key={item.file} className={item.file === session?.file ? "session-row active" : "session-row"}>
         <button className="session-open" onClick={() => openSession(project.path, item.file)} title={item.title}>
@@ -619,13 +627,15 @@ export function App() {
         <span className="session-status">
           {status !== "running" && (
             <>
-              <button
-                className="row-action"
-                onClick={() => send({ type: "remove_session", file: item.file })}
-                title="Remove session"
-              >
-                <X size={14} />
-              </button>
+              {!activeTask && (
+                <button
+                  className="row-action"
+                  onClick={() => send({ type: "remove_session", file: item.file })}
+                  title="Remove session"
+                >
+                  <X size={14} />
+                </button>
+              )}
               {item.unread && <span className="unread-dot" />}
             </>
           )}
@@ -914,7 +924,7 @@ export function App() {
                 <input
                   value={cwd}
                   onChange={onPathChange}
-                  placeholder="D:\Projects\my-app"
+                  placeholder="~/Projects/my-app"
                   disabled={!connected}
                   autoFocus={!TOUCH}
                 />

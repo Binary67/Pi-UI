@@ -315,8 +315,8 @@ type MessageViewProps = {
   running: boolean;
   /** True when this message is still streaming. */
   streaming: boolean;
-  /** Fork the session before a user message. Gets the timestamp, text, and images of the message. */
-  onFork: (timestamp: number, text: string, images: PromptImage[]) => void;
+  /** Fork the session before a user message. Gets the timestamp, text, and images of the message. Absent when the session cannot be forked. */
+  onFork?: (timestamp: number, text: string, images: PromptImage[]) => void;
 };
 
 export const MessageView = memo(function MessageView({
@@ -341,13 +341,15 @@ export const MessageView = memo(function MessageView({
         {text && <div className="user-text">{text}</div>}
         <div className="message-actions">
           {text && <CopyAction text={text} />}
-          <button
-            className="action-button"
-            onClick={() => onFork(message.timestamp, text, images)}
-            aria-label="Fork from here"
-          >
-            <GitFork size={18} />
-          </button>
+          {onFork && (
+            <button
+              className="action-button"
+              onClick={() => onFork(message.timestamp, text, images)}
+              aria-label="Fork from here"
+            >
+              <GitFork size={18} />
+            </button>
+          )}
           <button className="action-button" aria-label="Share · Soon" disabled>
             <Share size={18} />
           </button>
