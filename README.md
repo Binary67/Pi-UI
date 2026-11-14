@@ -63,8 +63,11 @@ the orchestrator runs. When you remove a project, its orchestrators are removed 
    files.
 4. The orchestrator reviews the branch, and sends corrections or merges it with `git`. After the merge, it accepts the
    task. The server then stops the subagent and deletes the worktree and the branch. It also deletes them when the
-   orchestrator cancels a task, when you remove the orchestrator, or when you remove the project.
+   orchestrator cancels a task, when you remove the orchestrator, or when you remove the project. If the cleanup of a
+   task fails, the task goes back to review, and `cancel_task` tries the cleanup again.
 
+- At startup, the server deletes each worktree folder and each `pi-ui/*` branch that no running task or task in review
+  owns. This removes what a crash or a failed cleanup left behind.
 - The project must be the top folder of a git repository, with at least one commit and no uncommitted changes.
 - The task board on the right shows the tasks of the orchestrator on the page, or of the orchestrator of the subagent
   session on the page. A click on a card opens the session of its task. You can type in the session of a running task

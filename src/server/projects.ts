@@ -96,6 +96,11 @@ export function isKept(file: string): boolean {
   );
 }
 
+/** The paths of all projects. */
+export function projectPaths(): string[] {
+  return projects.map((project) => project.path);
+}
+
 /** The orchestrators of the project in `path`. */
 export function getOrchestrators(path: string): Orchestrator[] {
   return projects.find((project) => project.path === path)?.orchestrators ?? [];

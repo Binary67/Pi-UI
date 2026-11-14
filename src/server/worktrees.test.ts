@@ -12,6 +12,7 @@ import {
   commitAll,
   diffSince,
   isMerged,
+  removeLeftovers,
   removeWorktree,
   runSetup,
 } from "./worktrees.ts";
@@ -86,4 +87,31 @@ test("a task branch goes from a new worktree to a merge, then the worktree and t
   assert.doesNotMatch(git(repo, "worktree", "list"), /task-1/);
   // The branch can be gone already.
   await removeWorktree(repo, worktree, branch);
+});
+
+test("the startup sweep keeps the active worktree and branch, and deletes the rest", async (t) => {
+  const dir = await fixture(t);
+  const repo = join(dir, "repo");
+  git(dir, "init", "-q", repo);
+  await writeFile(join(repo, "a.txt"), "a\n");
+  git(repo, "add", "-A");
+  git(repo, "commit", "-q", "-m", "first");
+
+  const root = join(dir, "worktrees");
+  const keep = { worktree: join(root, "x", "task-1"), branch: "pi-ui/x/task-1" };
+  const leak = { worktree: join(root, "x", "task-2"), branch: "pi-ui/x/task-2" };
+  await addWorktree(repo, keep.worktree, keep.branch);
+  await addWorktree(repo, leak.worktree, leak.branch);
+  await mkdir(join(root, "orphan"));
+  git(repo, "branch", "other");
+
+  // A path that is not a repository does not stop the sweep.
+  await removeLeftovers(root, [join(dir, "missing"), repo], [keep]);
+  assert.equal(existsSync(keep.worktree), true);
+  assert.equal(existsSync(leak.worktree), false);
+  assert.equal(existsSync(join(root, "orphan")), false);
+  assert.match(git(repo, "branch", "--list", keep.branch), /task-1/);
+  assert.equal(git(repo, "branch", "--list", leak.branch), "");
+  assert.match(git(repo, "branch", "--list", "other"), /other/);
+  assert.doesNotMatch(git(repo, "worktree", "list"), /task-2/);
 });
