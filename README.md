@@ -16,15 +16,14 @@ npm ci
 
 ## Run
 
-From this project directory, use separate terminals:
+From this project directory, start the backend and the web UI together:
 
 ```bash
-npm run dev:server
+npm run dev
 ```
 
-```bash
-npm run dev:web
-```
+Ctrl+C stops both. To run them separately, use `npm run dev:server` and
+`npm run dev:web` in separate terminals.
 
 Open http://localhost:5173. The backend listens on `127.0.0.1:3001`.
 Your terminal Pi continues to work normally; the UI starts separate processes
