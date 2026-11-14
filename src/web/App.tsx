@@ -323,7 +323,7 @@ export function App() {
     send({ type: "start", cwd: path.trim(), file });
   }
 
-  /** Start a new orchestrator in the project in `path`. The other orchestrators of the project stay. */
+  /** Show the empty orchestrator of the project in `path`, or a new one when it has none. The other orchestrators of the project stay. */
   function startOrchestrator(path: string) {
     setErrors([]);
     setDrawer(false);
@@ -546,7 +546,9 @@ export function App() {
                 {expanded.has(project.path) ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                 <span className="project-name">{folderName(project.path)}</span>
               </button>
-              {project.path !== session?.cwd && !project.sessions.some((item) => statuses[item.file] === "running") && (
+              {project.path !== session?.cwd &&
+!project.sessions.some((item) => statuses[item.file] === "running") &&
+!project.orchestrators.some((item) => statuses[item.file] === "running") && (
                 <button className="row-action" onClick={() => removeProject(project)} title="Remove project">
                   <X size={14} />
                 </button>
