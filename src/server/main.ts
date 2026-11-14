@@ -176,6 +176,13 @@ async function refresh(session: Session): Promise<void> {
   sendToViewers(session.file, { type: "info", file: session.file, info: session.info });
 }
 
+/** Read the usage stats of `session` again, and send them to the pages that show the session. */
+async function refreshStats(session: Session): Promise<void> {
+  const stats = await session.pi.send({ type: "get_session_stats" });
+  session.info = { ...session.info, stats: stats.data };
+  sendToViewers(session.file, { type: "info", file: session.file, info: session.info });
+}
+
 /**
  * Start a Pi process for the session in `file`, or for a new session in `cwd`, with the extra Pi options `args`. The
  * session is not live yet. A new session works in the folder `dir`, such as the worktree of a task. A saved session
@@ -198,8 +205,11 @@ async function launch(cwd: string, file?: string, args: string[] = [], dir = cwd
         keepSession(session.cwd, session.file);
         void broadcastProjects();
       }
-      // A refresh fails only when the Pi process stops. The exit handler reports that.
-      if (event.type === "message_end" || event.type === "compaction_end") refresh(session).catch(() => {});
+      // Only an assistant message or a compaction changes the usage stats. A refresh fails only when the Pi process
+      // stops. The exit handler reports that.
+      if ((event.type === "message_end" && event.message.role === "assistant") || event.type === "compaction_end") {
+        refreshStats(session).catch(() => {});
+      }
       if (event.type === "agent_start" || event.type === "agent_settled") broadcast(statusMessage());
       if (event.type === "agent_start" || event.type === "agent_settled" || event.type === "tool_execution_start") {
         followTask(session, event);
@@ -388,6 +398,7 @@ async function dropOrchestrator(file: string): Promise<void> {
   for (const [socket, viewed] of views) {
     if (!files.includes(viewed)) continue;
     views.delete(socket);
+    release(viewed);
     send(socket, { type: "snapshot", session: null });
   }
   broadcast(tasksMessage());
@@ -504,6 +515,8 @@ async function launchTask(path: string, task: Task): Promise<void> {
     );
     task.file = session.file;
     saveTasks();
+    // The task can be cancelled while Pi starts. Then `closeTask` stops the session.
+    if (task.status !== "running") return;
     await session.pi.send({ type: "prompt", message: taskPrompt(task) });
   } catch (error) {
     // When the Pi process exited, its exit handler already moved the task to review.
