@@ -18,11 +18,13 @@ export function savedMicrophone(): Microphone | undefined {
   return value ? (JSON.parse(value) as Microphone) : undefined;
 }
 
+// Without echo cancellation, Safari does not join the microphone and the sound output into one voice-processing
+// unit. With it, a Bluetooth microphone gives silence while the output is on a different Bluetooth device.
 /** Open the microphone that the user chose. When its device ID changed, its label finds it again. */
 async function openMicrophone(): Promise<MediaStream> {
   const saved = savedMicrophone();
-  if (!saved) return navigator.mediaDevices.getUserMedia({ audio: true });
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: saved.deviceId } });
+  if (!saved) return navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false } });
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, deviceId: saved.deviceId } });
   if (stream.getAudioTracks()[0].label === saved.label) return stream;
   // The page has a microphone now, so the browser gives the labels of the devices.
   const found = (await navigator.mediaDevices.enumerateDevices()).find(
@@ -30,7 +32,7 @@ async function openMicrophone(): Promise<MediaStream> {
   );
   for (const track of stream.getTracks()) track.stop();
   if (!found) throw new Error(NOT_CONNECTED);
-  const exact = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: found.deviceId } } });
+  const exact = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, deviceId: { exact: found.deviceId } } });
   localStorage.setItem(MICROPHONE_KEY, JSON.stringify({ deviceId: found.deviceId, label: saved.label }));
   return exact;
 }
@@ -99,8 +101,7 @@ export function MicButton({ disabled, transcribing, onRecord, onError }: MicButt
       void audio.close();
       const blob = new Blob(chunks, { type: recorder.mimeType });
       if (!mountedRef.current) return;
-      // Safari gives exact zeros from some microphones, such as a Bluetooth microphone while the sound output is on
-      // another Bluetooth device.
+      // The browser gives silence when it has no access to the microphone.
       if (!soundRef.current) return onError(SILENCE);
       if (!blob.size) return;
       const reader = new FileReader();
