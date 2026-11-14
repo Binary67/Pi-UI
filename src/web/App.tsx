@@ -11,6 +11,7 @@ import {
   Menu,
   Pi,
   Puzzle,
+  Settings as SettingsIcon,
   SquarePen,
   Workflow,
   X,
@@ -47,6 +48,7 @@ import { MicButton } from "./MicButton.tsx";
 import { Remote } from "./Remote.tsx";
 import { SendButton } from "./SendButton.tsx";
 import { SessionFooter } from "./SessionFooter.tsx";
+import { Settings } from "./Settings.tsx";
 import { TaskBoard } from "./TaskBoard.tsx";
 
 /** Distance in pixels from the page bottom that still counts as "at the bottom". */
@@ -124,8 +126,10 @@ export function App() {
   /** True when the task board shows as a drawer, on a medium or narrow screen. */
   const [board, setBoard] = useState(false);
   const [session, setSession] = useState<SessionSnapshot | null>(null);
-  /** The start screen shows to choose a folder for a new session, or a project for its orchestrator. */
-  const [picking, setPicking] = useState<false | "session" | "orchestrator">(false);
+  /** The start screen shows to choose a folder for a new session. */
+  const [picking, setPicking] = useState(false);
+  /** The settings page shows. It replaces the chat and the start screen. */
+  const [settings, setSettings] = useState(false);
   // A saved session opens at once. The skeleton shows until it opens, so the welcome screen does not flash.
   const [loading, setLoading] = useState(() => localStorage.getItem(VIEW_KEY) !== null);
   const [errors, setErrors] = useState<string[]>([]);
@@ -135,7 +139,7 @@ export function App() {
   const [transcribing, setTranscribing] = useState(false);
   const [atBottom, setAtBottom] = useState(true);
   const running = session?.state.running ?? false;
-  const showChat = session && !picking && !loading;
+  const showChat = session && !picking && !settings && !loading;
 
   useEffect(() => {
     let socket: WebSocket;
@@ -323,6 +327,7 @@ export function App() {
 
   function start(path: string, file?: string) {
     setErrors([]);
+    setSettings(false);
     setDrawer(false);
     send({ type: "start", cwd: path.trim(), file });
   }
@@ -333,6 +338,7 @@ export function App() {
    */
   function startOrchestrator(path: string) {
     setErrors([]);
+    setSettings(false);
     setDrawer(false);
     setBoard(false);
     send({ type: "orchestrator", cwd: path.trim() });
@@ -367,14 +373,23 @@ export function App() {
     setBoard(false);
     if (file !== session?.file) return start(path, file);
     setPicking(false);
+    setSettings(false);
     setDrawer(false);
   }
 
-  function pick(mode: "session" | "orchestrator") {
+  function pick() {
     setCwd("");
-    setPicking(mode);
+    setPicking(true);
+    setSettings(false);
     setDrawer(false);
     send({ type: "list_folders", path: "" });
+  }
+
+  function openSettings() {
+    setSettings(true);
+    setPicking(false);
+    setDrawer(false);
+    setBoard(false);
   }
 
   function toggleProject(path: string) {
@@ -406,8 +421,7 @@ export function App() {
 
   function onStart(event: FormEvent) {
     event.preventDefault();
-    if (picking === "orchestrator") startOrchestrator(cwd);
-    else start(cwd);
+    start(cwd);
   }
 
   function submit(streamingBehavior: StreamingBehavior) {
@@ -553,119 +567,128 @@ export function App() {
   return (
     <div className="app">
       <aside className={drawer ? "sidebar open" : "sidebar"}>
-        <div className="brand">
-          <span className="brand-mark">
-            <Pi size={16} />
-          </span>
-          Pi
-        </div>
-        <Remote url={remoteUrl} />
-        <button className="nav-item" onClick={() => pick("orchestrator")}>
-          <Workflow size={16} />
-          Orchestrator
-        </button>
-        <button className="nav-item" disabled>
-          <Puzzle size={16} />
-          Plugins
-          <span className="soon">Soon</span>
-        </button>
-        <button className="nav-item" disabled>
-          <Bot size={16} />
-          Bots
-          <span className="soon">Soon</span>
-        </button>
-        <div className="sidebar-heading">
-          <span className="project-name">Projects</span>
-          <button className="row-action" onClick={() => pick("session")} title="Add project">
-            <FolderPlus size={14} />
+        <div className="sidebar-body">
+          <div className="brand">
+            <span className="brand-mark">
+              <Pi size={16} />
+            </span>
+            Pi
+          </div>
+          <Remote url={remoteUrl} />
+          <button className="nav-item" disabled>
+            <Puzzle size={16} />
+            Plugins
+            <span className="soon">Soon</span>
           </button>
-        </div>
-        {projects.map((project) => {
-          // The session files of the tasks of all orchestrators. They show under their orchestrator.
-          const taskFiles = new Set(
-            project.orchestrators.flatMap((item) => (tasks[item.file] ?? []).flatMap((task) => task.file ?? [])),
-          );
-          return (
-            <section key={project.path} className="project">
-              <div className="project-row" title={project.path}>
-                <button className="project-toggle" onClick={() => toggleProject(project.path)}>
-                  {expanded.has(project.path) ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                  <span className="project-name">{folderName(project.path)}</span>
-                </button>
-                {project.path !== session?.cwd &&
-                  !project.sessions.some((item) => statuses[item.file] === "running") &&
-                  !project.orchestrators.some((item) => statuses[item.file] === "running") && (
-                    <button className="row-action" onClick={() => removeProject(project)} title="Remove project">
-                      <X size={14} />
-                    </button>
-                  )}
-                <button className="row-action new-session" onClick={() => start(project.path)} title="New session">
-                  <SquarePen size={14} />
-                </button>
-              </div>
-              {expanded.has(project.path) && (
-                <ul className="sessions">
-                  {project.orchestrators.map((item) => {
-                    // The task sessions of the orchestrator, in task start order. A task without a session has no row.
-                    const children = (tasks[item.file] ?? []).flatMap((task) => {
-                      const child = project.sessions.find((entry) => entry.file === task.file);
-                      return child ? [child] : [];
-                    });
-                    // The orchestrator also shows its children while the page shows one of them.
-                    const open = unfolded.has(item.file) || children.some((child) => child.file === session?.file);
-                    return (
-                      <Fragment key={item.file}>
-                        <li className={item.file === session?.file ? "session-row active" : "session-row"}>
-                          {children.length > 0 ? (
-                            <button
-                              className="session-toggle"
-                              onClick={() => toggleOrchestrator(item.file)}
-                              title={open ? "Fold tasks" : "Unfold tasks"}
-                            >
-                              {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                            </button>
-                          ) : (
-                            <span className="session-toggle" />
-                          )}
-                          <button
-                            className="session-open"
-                            onClick={() => openSession(project.path, item.file)}
-                            title={item.title}
-                          >
-                            <Workflow size={14} className="session-icon" />
-                            <span className={titleClass(statuses[item.file])}>{item.title}</span>
-                          </button>
-                          <span className="session-status">
-                            {statuses[item.file] !== "running" && (
-                              <>
-                                <button
-                                  className="row-action"
-                                  onClick={() => removeOrchestrator(item.file)}
-                                  title="Remove orchestrator"
-                                >
-                                  <X size={14} />
-                                </button>
-                                {item.unread && <span className="unread-dot" />}
-                              </>
+          <button className="nav-item" disabled>
+            <Bot size={16} />
+            Bots
+            <span className="soon">Soon</span>
+          </button>
+          <div className="sidebar-heading">
+            <span className="project-name">Projects</span>
+            <button className="row-action" onClick={pick} title="Add project">
+              <FolderPlus size={14} />
+            </button>
+          </div>
+          {projects.map((project) => {
+            // The session files of the tasks of all orchestrators. They show under their orchestrator.
+            const taskFiles = new Set(
+              project.orchestrators.flatMap((item) => (tasks[item.file] ?? []).flatMap((task) => task.file ?? [])),
+            );
+            return (
+              <section key={project.path} className="project">
+                <div className="project-row" title={project.path}>
+                  <button className="project-toggle" onClick={() => toggleProject(project.path)}>
+                    {expanded.has(project.path) ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    <span className="project-name">{folderName(project.path)}</span>
+                  </button>
+                  {project.path !== session?.cwd &&
+                    !project.sessions.some((item) => statuses[item.file] === "running") &&
+                    !project.orchestrators.some((item) => statuses[item.file] === "running") && (
+                      <button className="row-action" onClick={() => removeProject(project)} title="Remove project">
+                        <X size={14} />
+                      </button>
+                    )}
+                  <button
+                    className="row-action new-orchestrator"
+                    onClick={() => startOrchestrator(project.path)}
+                    title="New orchestrator"
+                  >
+                    <Workflow size={14} />
+                  </button>
+                  <button className="row-action new-session" onClick={() => start(project.path)} title="New session">
+                    <SquarePen size={14} />
+                  </button>
+                </div>
+                {expanded.has(project.path) && (
+                  <ul className="sessions">
+                    {project.orchestrators.map((item) => {
+                      // The task sessions of the orchestrator, in task start order. A task without a session has no row.
+                      const children = (tasks[item.file] ?? []).flatMap((task) => {
+                        const child = project.sessions.find((entry) => entry.file === task.file);
+                        return child ? [child] : [];
+                      });
+                      // The orchestrator also shows its children while the page shows one of them.
+                      const open = unfolded.has(item.file) || children.some((child) => child.file === session?.file);
+                      return (
+                        <Fragment key={item.file}>
+                          <li className={item.file === session?.file ? "session-row active" : "session-row"}>
+                            {children.length > 0 ? (
+                              <button
+                                className="session-toggle"
+                                onClick={() => toggleOrchestrator(item.file)}
+                                title={open ? "Fold tasks" : "Unfold tasks"}
+                              >
+                                {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                              </button>
+                            ) : (
+                              <span className="session-toggle" />
                             )}
-                          </span>
-                        </li>
-                        {open && children.length > 0 && (
-                          <li className="session-group">
-                            <ul className="sessions">{children.map((child) => sessionRow(project, child))}</ul>
+                            <button
+                              className="session-open"
+                              onClick={() => openSession(project.path, item.file)}
+                              title={item.title}
+                            >
+                              <Workflow size={14} className="session-icon" />
+                              <span className={titleClass(statuses[item.file])}>{item.title}</span>
+                            </button>
+                            <span className="session-status">
+                              {statuses[item.file] !== "running" && (
+                                <>
+                                  <button
+                                    className="row-action"
+                                    onClick={() => removeOrchestrator(item.file)}
+                                    title="Remove orchestrator"
+                                  >
+                                    <X size={14} />
+                                  </button>
+                                  {item.unread && <span className="unread-dot" />}
+                                </>
+                              )}
+                            </span>
                           </li>
-                        )}
-                      </Fragment>
-                    );
-                  })}
-                  {project.sessions
-                    .filter((item) => !taskFiles.has(item.file))
-                    .map((item) => sessionRow(project, item))}
-                </ul>
-              )}
-            </section>
-          );
-        })}
+                          {open && children.length > 0 && (
+                            <li className="session-group">
+                              <ul className="sessions">{children.map((child) => sessionRow(project, child))}</ul>
+                            </li>
+                          )}
+                        </Fragment>
+                      );
+                    })}
+                    {project.sessions
+                      .filter((item) => !taskFiles.has(item.file))
+                      .map((item) => sessionRow(project, item))}
+                  </ul>
+                )}
+              </section>
+            );
+          })}
+        </div>
+        <button className="nav-item" onClick={openSettings}>
+          <SettingsIcon size={16} />
+          Settings
+        </button>
       </aside>
       {drawer && <div className="backdrop" onClick={() => setDrawer(false)} />}
 
@@ -674,7 +697,7 @@ export function App() {
           <button className="icon-button menu-button" onClick={() => setDrawer(true)} title="Open sidebar">
             <Menu size={18} />
           </button>
-          {loading && <span className="skeleton skeleton-chip" />}
+          {loading && !settings && <span className="skeleton skeleton-chip" />}
           {showChat && (
             <span className="chip" title={session.cwd}>
               <Folder size={14} />
@@ -708,7 +731,9 @@ export function App() {
           </div>
         )}
 
-        {loading ? (
+        {settings ? (
+          <Settings onBack={session ? () => setSettings(false) : undefined} />
+        ) : loading ? (
           <Skeleton />
         ) : showChat ? (
           <>
@@ -800,31 +825,8 @@ export function App() {
         ) : (
           <main className="welcome">
             <div className="welcome-inner">
-              {picking === "orchestrator" ? (
-                <>
-                  <h1>Orchestrator</h1>
-                  <p className="welcome-sub">
-                    Choose a project. An orchestrator solves one problem. For the next problem, start a new orchestrator.
-                  </p>
-                  {projects.length > 0 && (
-                    <ul className="folders project-list">
-                      {projects.map((project) => (
-                        <li key={project.path}>
-                          <button onClick={() => startOrchestrator(project.path)} title={project.path}>
-                            <Workflow size={16} />
-                            <span>{folderName(project.path)}</span>
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </>
-              ) : (
-                <>
-                  <h1>{greeting()}</h1>
-                  <p className="welcome-sub">Choose a project folder to start a session.</p>
-                </>
-              )}
+              <h1>{greeting()}</h1>
+              <p className="welcome-sub">Choose a project folder to start a session.</p>
               <form className="folder-card" onSubmit={onStart}>
                 <Folder size={18} />
                 <input
