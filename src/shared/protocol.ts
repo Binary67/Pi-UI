@@ -44,7 +44,9 @@ export type ClientMessage =
   | { type: "remove_project"; path: string }
   | { type: "remove_session"; file: string }
   /** List the subfolders of `path`, or of the home folder when `path` is empty. */
-  | { type: "list_folders"; path: string };
+  | { type: "list_folders"; path: string }
+  /** Ask for a `pong`, to check that the connection is alive. */
+  | { type: "ping" };
 
 export type SessionSnapshot = { cwd: string; file: string; state: ChatState; info: SessionInfo };
 
@@ -75,4 +77,6 @@ export type ServerMessage =
   | { type: "info"; file: string; info: SessionInfo }
   /** The text of the queued messages that an abort removed, for the composer. */
   | { type: "restore"; text: string }
+  /** The answer to a `ping`. */
+  | { type: "pong" }
   | { type: "error"; message: string };

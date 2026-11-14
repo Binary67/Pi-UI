@@ -30,6 +30,9 @@ const ALLOWED_ORIGINS = new Set([
 
 // An idle session that no page shows stays warm this long, so it opens again at once. Then its Pi process stops.
 const WARM_MS = 10 * 60 * 1000;
+// A phone can lose its connection without a close. A page that does not answer a ping before the next one is gone: its
+// socket closes, so its session no longer counts as shown.
+const HEARTBEAT_MS = 30 * 1000;
 
 type Session = { cwd: string; file: string; pi: PiProcess; state: ChatState; info: SessionInfo; timer?: NodeJS.Timeout };
 
@@ -267,6 +270,8 @@ const starting = new Map<WebSocket, Promise<void>>();
 
 async function handle(socket: WebSocket, message: ClientMessage): Promise<void> {
   switch (message.type) {
+    case "ping":
+      return send(socket, { type: "pong" });
     case "list_folders":
       return send(socket, { type: "folders", listing: await listFolders(message.path) });
     case "start": {
@@ -331,8 +336,19 @@ const server = new WebSocketServer({
 
 server.on("listening", () => console.log(`Pi UI server on ws://${HOST}:${PORT}/ws`));
 
+// The pages that answered the last ping.
+const alive = new WeakSet<WebSocket>();
+setInterval(() => {
+  for (const client of clients) {
+    if (alive.delete(client)) client.ping();
+    else client.terminate();
+  }
+}, HEARTBEAT_MS);
+
 server.on("connection", (socket) => {
   clients.add(socket);
+  alive.add(socket);
+  socket.on("pong", () => alive.add(socket));
   send(socket, { type: "remote", url: REMOTE_URL });
   send(socket, statusMessage());
   void listProjects().then((projects) => send(socket, { type: "projects", projects }));

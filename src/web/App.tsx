@@ -50,6 +50,9 @@ const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif
 /** The wait before the first reconnect. Each failed attempt doubles it, up to the maximum. */
 const RECONNECT_MIN_MS = 500;
 const RECONNECT_MAX_MS = 5000;
+/** The time between two pings. A socket that receives no message within PONG_TIMEOUT_MS of a ping is dead. */
+const PING_MS = 15000;
+const PONG_TIMEOUT_MS = 5000;
 /** True on a touch screen. Enter then adds a new line, and no field takes the focus by itself. */
 const TOUCH = matchMedia("(hover: none), (any-pointer: coarse)").matches;
 
@@ -109,13 +112,18 @@ export function App() {
   useEffect(() => {
     let socket: WebSocket;
     let delay = RECONNECT_MIN_MS;
+    /** The next reconnect. Undefined while a socket connects or is open. */
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let pingTimer: ReturnType<typeof setInterval> | undefined;
+    /** The wait for an answer to the last ping. */
+    let pongTimer: ReturnType<typeof setTimeout> | undefined;
 
     function connect() {
+      timer = undefined;
       // An HTTPS page, such as the tailnet URL, must use a secure socket.
       socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
       socket.onopen = () => {
-        // Only an open socket sends. Clicks while the socket connects go to the closed one and are dropped.
+        // Only an open socket sends. Clicks while the socket connects are dropped.
         socketRef.current = socket;
         delay = RECONNECT_MIN_MS;
         setConnected(true);
@@ -125,17 +133,13 @@ export function App() {
           const { cwd, file } = JSON.parse(view) as { cwd: string; file: string };
           send({ type: "start", cwd, file });
         }
+        pingTimer = setInterval(ping, PING_MS);
       };
-      socket.onclose = () => {
-        setConnected(false);
-        setSession(null);
-        setProjects([]);
-        setStatuses({});
-        setLoading(false);
-        timer = setTimeout(connect, delay);
-        delay = Math.min(delay * 2, RECONNECT_MAX_MS);
-      };
+      socket.onclose = reconnect;
       socket.onmessage = (message) => {
+        // Each message shows that the socket is alive, also a large one that arrives after the ping.
+        clearTimeout(pongTimer);
+        pongTimer = undefined;
         const data = JSON.parse(message.data) as ServerMessage;
         switch (data.type) {
           case "remote":
@@ -185,9 +189,50 @@ export function App() {
       };
     }
 
-    connect();
-    return () => {
+    /** Ask the server for a pong. A dead socket can still show as open, so only the answer shows that it is alive. */
+    function ping() {
+      if (pongTimer) return;
+      socket.send(JSON.stringify({ type: "ping" } satisfies ClientMessage));
+      pongTimer = setTimeout(reconnect, PONG_TIMEOUT_MS);
+    }
+
+    /** Drop the socket and connect again after the delay. The page shows its last data until the new socket opens. */
+    function reconnect() {
+      // A dead socket can send its close event much later. It must not start a second reconnect then.
+      socket.onopen = socket.onclose = socket.onmessage = null;
+      socket.close();
+      clearInterval(pingTimer);
+      clearTimeout(pongTimer);
+      pongTimer = undefined;
+      socketRef.current = null;
+      setConnected(false);
+      setLoading(false);
+      timer = setTimeout(connect, delay);
+      delay = Math.min(delay * 2, RECONNECT_MAX_MS);
+    }
+
+    // A phone can drop the socket while the page is hidden, and the timers of a hidden page wait. When the page shows
+    // again or the network comes back, check an open socket now, and connect now instead of after the delay.
+    function resume() {
+      if (document.hidden) return;
+      if (socket.readyState === WebSocket.OPEN) return ping();
+      if (timer === undefined) return;
       clearTimeout(timer);
+      delay = RECONNECT_MIN_MS;
+      connect();
+    }
+
+    connect();
+    document.addEventListener("visibilitychange", resume);
+    window.addEventListener("pageshow", resume);
+    window.addEventListener("online", resume);
+    return () => {
+      document.removeEventListener("visibilitychange", resume);
+      window.removeEventListener("pageshow", resume);
+      window.removeEventListener("online", resume);
+      clearTimeout(timer);
+      clearInterval(pingTimer);
+      clearTimeout(pongTimer);
       socket.onclose = null;
       socket.close();
     };
@@ -275,7 +320,8 @@ export function App() {
   }
 
   function submit(streamingBehavior: StreamingBehavior) {
-    if (!session || (!text.trim() && !images.length)) return;
+    // Offline, the text stays in the composer.
+    if (!connected || !session || (!text.trim() && !images.length)) return;
     send({ type: "prompt", file: session.file, text, images, streamingBehavior });
     setText("");
     setImages([]);
@@ -548,8 +594,8 @@ export function App() {
                     autoFocus={!TOUCH}
                   />
                   <SendButton
-                    running={running}
-                    ready={Boolean(text.trim() || images.length)}
+                    running={connected && running}
+                    ready={connected && Boolean(text.trim() || images.length)}
                     onSend={() => submit("steer")}
                     onStop={() => send({ type: "abort", file: session.file })}
                   />
