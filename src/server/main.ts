@@ -174,8 +174,16 @@ function tasksMessage(): ServerMessage {
   return { type: "tasks", tasks: Object.fromEntries(allTasks().map(([file, tasks]) => [file, tasks.map(taskSummary)])) };
 }
 
+let projectsCalls = 0;
+let projectsSent = 0;
+
+/** Send the project list to all pages. Overlapping calls never send an older list after a newer one. */
 async function broadcastProjects(): Promise<void> {
-  broadcast({ type: "projects", projects: await listProjects() });
+  const call = ++projectsCalls;
+  const projects = await listProjects();
+  if (call < projectsSent) return;
+  projectsSent = call;
+  broadcast({ type: "projects", projects });
 }
 
 function modelRef({ provider, id }: ModelRef): ModelRef {
@@ -246,7 +254,8 @@ async function launch(cwd: string, file?: string, args: string[] = [], dir = cwd
       }
       if (event.type === "agent_settled") {
         // A run that ends while no page shows its session stays unread in the sidebar until a page opens it.
-        if (![...views.values()].includes(session.file)) {
+        // A session that the server stopped, such as a removed orchestrator, stays out of the sidebar.
+        if (sessions.get(session.file) === session && ![...views.values()].includes(session.file)) {
           markUnread(session.cwd, session.file);
           void broadcastProjects();
         }
@@ -779,6 +788,8 @@ async function handle(socket: WebSocket, message: ClientMessage): Promise<void> 
     case "remove_session":
       // An orchestrator goes with its tasks.
       if (findOrchestrator(message.file)) return dropOrchestrator(message.file);
+      const removed = findTask(message.file)?.task;
+      if (removed && isActive(removed)) throw new Error("Finish or cancel the task first.");
       removeSession(message.file);
       // The pages that show the session go back to the start screen.
       for (const [viewer, viewed] of views) {
@@ -843,6 +854,9 @@ async function handle(socket: WebSocket, message: ClientMessage): Promise<void> 
       await session.pi.send({ type: "set_thinking_level", level: message.level });
       return refresh(session);
     case "fork": {
+      if (findOrchestrator(session.file) || findTask(session.file)) {
+        throw new Error("An orchestrator or a task session cannot be forked.");
+      }
       const file = await forkSession(session.file, message.timestamp);
       if (file) keepSession(session.cwd, file);
       // The fork opens in its own Pi process, after the other starts of the page. The original session does not change.
