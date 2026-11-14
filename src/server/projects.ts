@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Project, TaskSummary } from "../shared/protocol.ts";
@@ -47,11 +47,7 @@ let projects: StoredProject[] = load();
 
 function load(): StoredProject[] {
   try {
-    // A file from before the unread lists has none. Then no session is unread.
-    const loaded: StoredProject[] = JSON.parse(readFileSync(FILE, "utf8")).projects.map((project: StoredProject) => ({
-      ...project,
-      unread: project.unread ?? [],
-    }));
+    const loaded: StoredProject[] = JSON.parse(readFileSync(FILE, "utf8")).projects;
     // The Pi processes of the last server run have stopped. A task that was running then waits for review.
     for (const task of loaded.flatMap((project) => project.orchestrators.flatMap((item) => item.tasks))) {
       if (task.status === "running") Object.assign(task, { status: "review", note: "Interrupted by a server restart." });
@@ -63,10 +59,13 @@ function load(): StoredProject[] {
   }
 }
 
-// Synchronous writes, so two quick changes cannot interleave in the file.
+// Synchronous writes, so two quick changes cannot interleave in the file. The rename is atomic: a crash cannot leave a
+// broken file.
 function save(): void {
   mkdirSync(dirname(FILE), { recursive: true });
-  writeFileSync(FILE, `${JSON.stringify({ projects }, null, 2)}\n`);
+  const temporary = `${FILE}.tmp`;
+  writeFileSync(temporary, `${JSON.stringify({ projects }, null, 2)}\n`);
+  renameSync(temporary, FILE);
 }
 
 /** Add the project folder `path`. Returns true when it was not a project yet. */
