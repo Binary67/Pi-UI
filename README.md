@@ -93,6 +93,26 @@ tailnet. This Mac must stay awake, with both servers running.
 The microphone button in the composer records your voice. A second tap stops the
 recording. The server sends the audio to an Azure OpenAI `gpt-4o-transcribe`
 deployment, and the text goes to the end of the composer. It does not send.
+Transcription is English only.
+
+During a recording, a waveform left of the button shows the level of your voice.
+When you speak, the bars get taller. The tooltip of the waveform shows the name
+of the microphone.
+
+The microphone menu below the composer sets the microphone for this browser.
+**System default** uses the default microphone of the system. The browser shows
+the names of its microphones only after a first recording in the page.
+
+When the microphone gives no sound at all, the chat shows an error and does not
+send the recording. There are 2 known causes:
+
+- The browser has no access to the microphone. Open macOS System Settings →
+  Privacy & Security → Microphone, and turn on the browser. An app gets into
+  this list only through the macOS prompt. To make macOS ask Safari again, run
+  `tccutil reset Microphone com.apple.Safari` and restart Safari.
+- In Safari, a Bluetooth microphone gives silence while the sound output is on
+  a different Bluetooth device. Set the sound output to the built-in speakers or
+  a wired output, or use one Bluetooth device for both.
 
 Put the deployment in `.env`:
 

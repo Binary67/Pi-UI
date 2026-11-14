@@ -1,6 +1,7 @@
-import { Brain, Check, ChevronDown, Cpu, Search } from "lucide-react";
+import { Brain, Check, ChevronDown, Cpu, Mic, Search } from "lucide-react";
 import { Fragment, type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from "react";
 import type { ModelRef, SessionInfo, ThinkingLevel } from "../shared/protocol.ts";
+import { MICROPHONE_KEY, type Microphone, savedMicrophone } from "./MicButton.tsx";
 
 /** Context use above these percentages shows as a warning or a danger, as in the TUI footer. */
 const WARN_PERCENT = 70;
@@ -30,6 +31,8 @@ function modelKey(model: ModelRef): string {
 type MenuItem = { key: string; label: string; group?: string };
 
 type MenuProps = {
+  /** An extra class of the menu, for its styles. */
+  className?: string;
   icon: ReactNode;
   /** The text on the pill. */
   label: string;
@@ -41,11 +44,24 @@ type MenuProps = {
   disabled: boolean;
   /** When set, the menu shows a search field with this placeholder. */
   searchPlaceholder?: string;
+  /** Called when the menu opens. */
+  onOpen?: () => void;
   onSelect: (key: string) => void;
 };
 
 /** A ghost pill that opens a list above it, in the style of a macOS menu. */
-function Menu({ icon, label, title, items, selected, disabled, searchPlaceholder, onSelect }: MenuProps) {
+function Menu({
+  className,
+  icon,
+  label,
+  title,
+  items,
+  selected,
+  disabled,
+  searchPlaceholder,
+  onOpen,
+  onSelect,
+}: MenuProps) {
   const id = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -81,6 +97,7 @@ function Menu({ icon, label, title, items, selected, disabled, searchPlaceholder
   }, [open, active, id]);
 
   function show() {
+    onOpen?.();
     setQuery("");
     setActive(Math.max(items.findIndex((item) => item.key === selected), 0));
     setOpen(true);
@@ -117,7 +134,7 @@ function Menu({ icon, label, title, items, selected, disabled, searchPlaceholder
   }
 
   return (
-    <div className="menu" ref={rootRef}>
+    <div className={className ? `menu ${className}` : "menu"} ref={rootRef}>
       <button
         ref={buttonRef}
         className="pill"
@@ -185,6 +202,59 @@ function Menu({ icon, label, title, items, selected, disabled, searchPlaceholder
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * The microphone of voice input. The choice belongs to this browser, so a run does not block it. The browser gives the
+ * names of its microphones only after the page opened a microphone. Until then, the list shows only the saved choice.
+ */
+function MicrophoneMenu() {
+  const [saved, setSaved] = useState(savedMicrophone);
+  /** The microphones with a label. */
+  const [devices, setDevices] = useState<Microphone[]>([]);
+  const microphones = devices.length ? devices : saved ? [saved] : [];
+
+  async function refresh() {
+    const all = await navigator.mediaDevices.enumerateDevices();
+    setDevices(
+      all
+        // Chrome adds the virtual devices "default" and "communications": copies of other devices in the list.
+        .filter(
+          (device) =>
+            device.kind === "audioinput" &&
+            device.label &&
+            device.deviceId !== "default" &&
+            device.deviceId !== "communications",
+        )
+        .map(({ deviceId, label }) => ({ deviceId, label })),
+    );
+  }
+
+  useEffect(() => {
+    void refresh();
+    navigator.mediaDevices.addEventListener("devicechange", refresh);
+    return () => navigator.mediaDevices.removeEventListener("devicechange", refresh);
+  }, []);
+
+  return (
+    <Menu
+      className="microphone-menu"
+      icon={<Mic size={14} />}
+      label={saved?.label ?? "System default"}
+      title="Microphone"
+      // The label is the stable name of a device, so it is the key.
+      items={[{ key: "", label: "System default" }, ...microphones.map(({ label }) => ({ key: label, label }))]}
+      selected={saved?.label ?? ""}
+      disabled={false}
+      onOpen={() => void refresh()}
+      onSelect={(key) => {
+        const microphone = microphones.find((item) => item.label === key);
+        if (microphone) localStorage.setItem(MICROPHONE_KEY, JSON.stringify(microphone));
+        else localStorage.removeItem(MICROPHONE_KEY);
+        setSaved(microphone);
+      }}
+    />
   );
 }
 
@@ -260,13 +330,13 @@ function Usage({ stats }: { stats: SessionInfo["stats"] }) {
 
 type SessionFooterProps = {
   info: SessionInfo;
-  /** True while a run is in progress. The pickers do not change then. */
+  /** True while a run is in progress. The model and thinking pickers do not change then. */
   disabled: boolean;
   onSetModel: (model: ModelRef) => void;
   onSetThinkingLevel: (level: ThinkingLevel) => void;
 };
 
-/** The row below the composer: model and thinking pickers on the left, usage on the right. */
+/** The row below the composer: model, thinking, and microphone pickers on the left, usage on the right. */
 export function SessionFooter({ info, disabled, onSetModel, onSetThinkingLevel }: SessionFooterProps) {
   const { model, models } = info;
   // The menu needs the models of each provider next to each other.
@@ -299,6 +369,7 @@ export function SessionFooter({ info, disabled, onSetModel, onSetThinkingLevel }
           onSelect={(key) => onSetThinkingLevel(key as ThinkingLevel)}
         />
       )}
+      <MicrophoneMenu />
       <Usage stats={info.stats} />
     </div>
   );

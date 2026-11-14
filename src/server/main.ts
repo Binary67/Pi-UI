@@ -653,6 +653,8 @@ async function transcribe(audio: string, mimeType: string): Promise<string> {
   const type = mimeType.split(";")[0];
   const form = new FormData();
   form.append("file", new Blob([Buffer.from(audio, "base64")], { type }), `audio.${type.split("/")[1]}`);
+  // Voice input is English only.
+  form.append("language", "en");
   const response = await fetch(TRANSCRIBE_URL, { method: "POST", headers: { "api-key": TRANSCRIBE_KEY }, body: form });
   if (!response.ok) throw new Error(`Transcription failed with status ${response.status}: ${await response.text()}`);
   const { text } = (await response.json()) as { text: string };
