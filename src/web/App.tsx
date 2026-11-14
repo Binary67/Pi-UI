@@ -51,7 +51,7 @@ const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif
 const RECONNECT_MIN_MS = 500;
 const RECONNECT_MAX_MS = 5000;
 /** True on a touch screen. Enter then adds a new line, and no field takes the focus by itself. */
-const TOUCH = matchMedia("(hover: none)").matches;
+const TOUCH = matchMedia("(hover: none), (any-pointer: coarse)").matches;
 
 function readImage(file: File): Promise<PromptImage> {
   return new Promise((resolve, reject) => {

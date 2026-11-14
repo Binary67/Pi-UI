@@ -1677,7 +1677,7 @@ textarea::placeholder {
 
 /* Touch screen: there is no hover. The actions that show on hover always show, and the touch targets are larger. */
 
-@media (hover: none) {
+@media (hover: none), (any-pointer: coarse) {
   .row-action,
   .session-status {
     width: 32px;
