@@ -55,8 +55,8 @@ import {
   commitAll,
   diffSince,
   isMerged,
-  removeLeftovers,
   readBranch,
+  removeLeftovers,
   removeWorktree,
   runSetup,
   switchBranch,
@@ -390,7 +390,7 @@ async function start(socket: WebSocket, folder: string, file?: string): Promise<
       session: { cwd: session.cwd, file: session.file, state: session.state, info: session.info },
     });
     if (markRead(session.file)) void broadcastProjects();
-    await sendBranch(socket, session);
+    sendBranch(socket, session).catch((error: unknown) => console.error("Could not read the branch:", error));
   }
   if (previous) release(previous);
   prepareSpare(cwd);
