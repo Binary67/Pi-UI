@@ -165,6 +165,7 @@ test("a moved session gets the new working folder and keeps its entries, and a m
   const after = (await readFile(file, "utf8")).split("\n");
   assert.deepEqual(JSON.parse(after[0]), { ...JSON.parse(before[0]), cwd: "/projects/app" });
   assert.deepEqual(after.slice(1), before.slice(1));
+  assert.deepEqual(await readdir(dir), ["moved.jsonl"]);
 
   await moveSession(join(dir, "missing.jsonl"), "/projects/app");
   assert.deepEqual((await readdir(dir)).sort(), ["moved.jsonl"]);
