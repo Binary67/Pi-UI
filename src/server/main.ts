@@ -83,6 +83,8 @@ const WARM_MS = 10 * 60 * 1000;
 // A phone can lose its connection without a close. A page that does not answer a ping before the next one is gone: its
 // socket closes, so its session no longer counts as shown.
 const HEARTBEAT_MS = 30 * 1000;
+// A transcription that takes longer than this fails, so the composer does not wait for ever.
+const TRANSCRIBE_TIMEOUT_MS = 60 * 1000;
 
 // The Pi extension with the task tools, and the instructions of the orchestrator and its subagents.
 const ORCHESTRATOR_DIR = fileURLToPath(new URL("../orchestrator/", import.meta.url));
@@ -754,10 +756,22 @@ async function transcribe(audio: string, mimeType: string): Promise<string> {
   form.append("file", new Blob([Buffer.from(audio, "base64")], { type }), `audio.${type.split("/")[1]}`);
   // Voice input is English only.
   form.append("language", "en");
-  const response = await fetch(TRANSCRIBE_URL, { method: "POST", headers: { "api-key": TRANSCRIBE_KEY }, body: form });
-  if (!response.ok) throw new Error(`Transcription failed with status ${response.status}: ${await response.text()}`);
-  const { text } = (await response.json()) as { text: string };
-  return text;
+  try {
+    const response = await fetch(TRANSCRIBE_URL, {
+      method: "POST",
+      headers: { "api-key": TRANSCRIBE_KEY },
+      body: form,
+      signal: AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS),
+    });
+    if (!response.ok) throw new Error(`Transcription failed with status ${response.status}: ${await response.text()}`);
+    const { text } = (await response.json()) as { text: string };
+    return text;
+  } catch (error) {
+    if (error instanceof Error && error.name === "TimeoutError") {
+      throw new Error(`Transcription took longer than ${TRANSCRIBE_TIMEOUT_MS / 1000} s. Try again.`);
+    }
+    throw error;
+  }
 }
 
 // The starts of a page run one at a time, in order. Quick clicks then end on the session that the user chose last.
@@ -784,12 +798,19 @@ async function handle(socket: WebSocket, message: ClientMessage): Promise<void> 
     case "remove_project":
       await Promise.all(getOrchestrators(message.path).map((orchestrator) => dropOrchestrator(orchestrator.file)));
       removeProject(message.path);
+      if (spare?.cwd === message.path) {
+        const old = spare;
+        spare = undefined;
+        void old.session.then((session) => session.pi.stop(), () => {});
+      }
       return broadcastProjects();
     case "remove_session":
       // An orchestrator goes with its tasks.
       if (findOrchestrator(message.file)) return dropOrchestrator(message.file);
       const removed = findTask(message.file)?.task;
       if (removed && isActive(removed)) throw new Error("Finish or cancel the task first.");
+      // A running session would come back in the sidebar with its next message.
+      if (sessions.get(message.file)?.state.running) throw new Error("This session is running. Stop it or wait until it ends.");
       removeSession(message.file);
       // The pages that show the session go back to the start screen.
       for (const [viewer, viewed] of views) {
@@ -881,6 +902,15 @@ const server = new WebSocketServer({
 
 server.on("listening", () => console.log(`Pi UI server on ws://${HOST}:${PORT}/ws`));
 
+// A setup command runs in its own process group, so Ctrl+C does not reach it. Aborting kills the group at once. Then the
+// signal goes to the server again, so it ends as it did without the handler.
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+  process.once(signal, () => {
+    for (const abort of aborts.values()) abort.abort();
+    process.kill(process.pid, signal);
+  });
+}
+
 // The pages that answered the last ping.
 const alive = new WeakSet<WebSocket>();
 setInterval(() => {
@@ -900,9 +930,10 @@ server.on("connection", (socket) => {
   void listProjects().then((projects) => send(socket, { type: "projects", projects }));
 
   socket.on("message", (data) => {
-    handle(socket, JSON.parse(String(data)) as ClientMessage).catch((error: unknown) =>
-      send(socket, { type: "error", message: error instanceof Error ? error.message : String(error) }),
-    );
+    // The parse is inside the chain, so a malformed message gives an error and the server keeps running.
+    Promise.resolve()
+      .then(() => handle(socket, JSON.parse(String(data)) as ClientMessage))
+      .catch((error: unknown) => send(socket, { type: "error", message: error instanceof Error ? error.message : String(error) }));
   });
 
   socket.on("close", () => {
