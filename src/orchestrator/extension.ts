@@ -17,6 +17,7 @@ type ExtensionAPI = {
     description: string;
     promptSnippet: string;
     parameters: object;
+    executionMode?: "sequential";
     execute(id: string, params: unknown, signal: unknown, onUpdate: unknown, ctx: Context): Promise<ToolResult>;
   }): void;
   registerCommand(name: string, options: { description: string; handler(args: string): Promise<void> }): void;
@@ -33,9 +34,11 @@ function object(properties: object, required: string[]): object {
   return { type: "object", properties, required, additionalProperties: false };
 }
 
+// The tools that change shared state (task ids, git branches, worktrees) are sequential. Pi then runs all calls of a message in order.
 const TOOLS = [
   {
     name: "start_tasks",
+    executionMode: "sequential" as const,
     label: "Start tasks",
     promptSnippet: "Start tasks in parallel, each with its own subagent and git worktree",
     description:
@@ -90,6 +93,7 @@ const TOOLS = [
   },
   {
     name: "message_task",
+    executionMode: "sequential" as const,
     label: "Message task",
     promptSnippet: "Send instructions to the subagent of a task",
     description:
@@ -109,6 +113,7 @@ const TOOLS = [
   },
   {
     name: "finish_task",
+    executionMode: "sequential" as const,
     label: "Finish task",
     promptSnippet: "Accept a merged task in review",
     description:
@@ -117,6 +122,7 @@ const TOOLS = [
   },
   {
     name: "cancel_task",
+    executionMode: "sequential" as const,
     label: "Cancel task",
     promptSnippet: "Cancel a task",
     description:
