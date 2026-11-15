@@ -1,5 +1,6 @@
-import { type ChildProcessByStdio, spawn } from "node:child_process";
+import type { ChildProcessByStdio } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
+import { spawn } from "cross-spawn";
 import type {
   JsonAgentSessionEvent,
   RpcCommand,
