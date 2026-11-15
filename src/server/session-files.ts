@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readFile, stat, writeFile } from "node:fs/promises";
+import { readFile, rename, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { AgentMessage } from "../shared/pi-rpc.ts";
 
@@ -93,7 +93,10 @@ export async function moveSession(file: string, cwd: string): Promise<void> {
   if (text === undefined) return;
   const end = text.indexOf("\n");
   const header = JSON.parse(text.slice(0, end)) as SessionHeader;
-  await writeFile(file, JSON.stringify({ ...header, cwd }) + text.slice(end));
+  // Write a temp file and rename it, so a crash cannot leave a broken session. The name must not end in .jsonl.
+  const temp = `${file}.tmp`;
+  await writeFile(temp, JSON.stringify({ ...header, cwd }) + text.slice(end));
+  await rename(temp, file);
 }
 
 /** Create a separate fork before a user message. Never write to the source, which may still be running. */
