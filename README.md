@@ -61,7 +61,8 @@ the orchestrator runs. When you remove a project, its orchestrators are removed 
    setup command of the plan in the worktree, such as `npm ci`, and then starts the subagent there.
 3. When a subagent run ends, the server commits the changes on the task branch. The task goes to review, and the
    orchestrator gets a task update with the changed files. The update also lists the changed files outside the owned
-   files.
+   files. The server holds the updates while the orchestrator runs, and sends them one at a time when it is idle. It
+   drops an update when its task has left review in the meantime, for example after `cancel_task`.
 4. The orchestrator reviews the branch, and sends corrections or merges it with `git`. After the merge, it accepts the
    task. The server then stops the subagent and deletes the worktree and the branch. It also deletes them when the
    orchestrator cancels a task, when you remove the orchestrator, or when you remove the project. If the cleanup of a
