@@ -62,26 +62,40 @@ export async function switchBranch(dir: string, branch: string, create: boolean)
 }
 
 /**
- * Run the shell command `command` in `dir`. A failure reports the end of the output. When `signal` aborts, the command
- * and all its child processes are killed.
+ * Run the shell command `command` in `dir`. A failure reports the end of the output. The shell is `cmd.exe` on Windows and
+ * `/bin/sh` elsewhere. When `signal` aborts, the command and all its child processes are killed.
  */
 export function runSetup(dir: string, command: string, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
-    // Nobody can answer a question of the command, so it gets no stdin. It leads its own process group.
-    const child = spawn("/bin/sh", ["-c", command], { cwd: dir, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+    // Nobody can answer a question of the command, so it gets no stdin. Outside Windows it leads its own process group.
+    // On Windows `detached` would open a console window.
+    const windows = process.platform === "win32";
+    const child = spawn(command, {
+      shell: true,
+      cwd: dir,
+      detached: !windows,
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     let output = "";
     const collect = (chunk: Buffer) => {
       output = (output + chunk).slice(-OUTPUT_LIMIT - 1);
     };
     child.stdout.on("data", collect);
     child.stderr.on("data", collect);
+    const stopped = () => reject(new Error("The setup command was stopped."));
     const abort = () => {
+      if (windows) {
+        // taskkill fails when the process has exited already. Then there is nothing to kill.
+        execFile("taskkill", ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true }, stopped);
+        return;
+      }
       try {
         process.kill(-child.pid!, "SIGKILL");
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
       }
-      reject(new Error("The setup command was stopped."));
+      stopped();
     };
     if (signal.aborted) abort();
     else signal.addEventListener("abort", abort, { once: true });

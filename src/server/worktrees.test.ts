@@ -68,7 +68,7 @@ test("a task branch goes from a new worktree to a merge, then the worktree and t
   const base = await addWorktree(repo, worktree, branch);
   assert.equal(base, git(repo, "rev-parse", "HEAD").trim());
   await runSetup(worktree, "mkdir deps && echo ok > deps/lib.txt", new AbortController().signal);
-  await assert.rejects(runSetup(worktree, "echo missing >&2; exit 3", new AbortController().signal), /The setup command failed: missing/);
+  await assert.rejects(runSetup(worktree, "node -e \"console.error('missing');process.exit(3)\"", new AbortController().signal), /The setup command failed: missing/);
 
   await writeFile(join(worktree, "a.txt"), "changed\n");
   await writeFile(join(worktree, "b.txt"), "new\n");
@@ -179,7 +179,12 @@ test("an aborted setup command rejects fast, and its child processes are killed"
   const dir = await fixture(t);
   const abort = new AbortController();
   const started = Date.now();
-  const run = runSetup(dir, "sleep 30 & echo $! > child.pid; wait", abort.signal);
+  // A node process starts a node child, writes its pid, and waits. This works in cmd.exe and in sh.
+  const run = runSetup(
+    dir,
+    "node -e \"const c=require('child_process').spawn(process.execPath,['-e','setTimeout(()=>{},30000)']);require('fs').writeFileSync('child.pid',String(c.pid));setTimeout(()=>{},30000)\"",
+    abort.signal,
+  );
   const rejected = assert.rejects(run);
   const pidFile = join(dir, "child.pid");
   while (!existsSync(pidFile) || !(await readFile(pidFile, "utf8")).trim()) await sleep(10);
@@ -190,5 +195,5 @@ test("an aborted setup command rejects fast, and its child processes are killed"
   await sleep(50);
   assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
   // A signal that is aborted already stops the command at once.
-  await assert.rejects(runSetup(dir, "sleep 30", abort.signal));
+  await assert.rejects(runSetup(dir, "node -e \"setTimeout(()=>{},30000)\"", abort.signal));
 });
