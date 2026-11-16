@@ -569,20 +569,26 @@ async function deliver(file: string): Promise<void> {
   if (!queue || inFlight.has(file) || sessions.get(file)?.state.running) return;
   for (const [task, { path, update, text }] of queue) {
     queue.delete(task);
+    // An update that is out of date must not open the session of the orchestrator.
+    if (task.status !== "review") continue;
     // No await comes before this line, so a second call cannot send at the same time.
     inFlight.add(file);
     try {
       const session = await open(path, file);
-      // The task can be cancelled or run again while the session opens. Then the update is out of date.
-      if (task.status === "review") {
-        const details = { id: update.id, title: update.title, status: update.status, note: update.note };
-        await session.pi.send({
-          type: "prompt",
-          message: `/pi-ui-task ${JSON.stringify({ text, details })}`,
-          streamingBehavior: "followUp",
-        });
+      try {
+        // The task can be cancelled or run again while the session opens.
+        if (task.status === "review") {
+          const details = { id: update.id, title: update.title, status: update.status, note: update.note };
+          await session.pi.send({
+            type: "prompt",
+            message: `/pi-ui-task ${JSON.stringify({ text, details })}`,
+            streamingBehavior: "followUp",
+          });
+          return;
+        }
+      } finally {
+        // The session is idle again, so its warm timer starts again.
         release(session.file);
-        return;
       }
     } catch (error) {
       // A failed send must not block the next updates.
