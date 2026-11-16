@@ -122,6 +122,11 @@ const views = new Map<WebSocket, string>();
 // for the project of the chat that a page opened last.
 let spare: { cwd: string; session: Promise<Session> } | undefined;
 const clients = new Set<WebSocket>();
+// The task updates that wait for an orchestrator, by its session file. Each task has at most one, in arrival order.
+const held = new Map<string, Map<Task, { path: string; update: Task; text: string }>>();
+// The orchestrators that got an update and have not settled since. `state.running` becomes true only at `agent_start`,
+// so without this set, a second update could go to Pi before the run of the first one starts.
+const inFlight = new Set<string>();
 
 function send(socket: WebSocket, message: ServerMessage): void {
   socket.send(JSON.stringify(message));
@@ -262,11 +267,16 @@ async function launch(cwd: string, file?: string, args: string[] = [], dir = cwd
           void broadcastProjects();
         }
         release(session.file);
+        // The run of an update has ended, so the orchestrator is idle and can get the next update.
+        inFlight.delete(session.file);
+        deliver(session.file).catch((error: unknown) => console.error("Could not send a task update:", error));
         // The agent can change the branch with bash.
         sendProjectBranches(session.cwd).catch((error: unknown) => console.error("Could not read the branch:", error));
       }
     },
     (code) => {
+      // An update that was in flight can no longer settle.
+      if (session) inFlight.delete(session.file);
       // A spare, or a session that the server stopped, is not in the map.
       if (!session || sessions.get(session.file) !== session) return;
       clearTimeout(session.timer);
@@ -454,6 +464,10 @@ async function dropOrchestrator(file: string): Promise<void> {
   const removed = removeOrchestrator(file);
   if (!removed) return;
   const { path, orchestrator } = removed;
+  // The updates for a removed orchestrator have no reader.
+  held.get(orchestrator.file)?.clear();
+  held.delete(orchestrator.file);
+  inFlight.delete(orchestrator.file);
   const files = [orchestrator.file, ...orchestrator.tasks.flatMap((task) => task.file ?? [])];
   for (const [socket, viewed] of views) {
     if (!files.includes(viewed)) continue;
@@ -535,20 +549,54 @@ async function taskChanges(task: Task): Promise<Changes> {
   return { files, outside: outside(task, files), diff };
 }
 
-/** Send the task update `text` to the orchestrator of `task`. The update starts a turn of the orchestrator. */
+/** Hold the task update `text` for the orchestrator of `task`. It goes out when the orchestrator is idle. */
 async function notify(path: string, task: Task, update: Task, text: string): Promise<void> {
   // The project or the orchestrator of the task can be gone.
   const orchestrator = getOrchestrators(path).find((item) => item.tasks.includes(task));
   if (!orchestrator) return;
-  const session = await open(path, orchestrator.file);
-  const details = { id: update.id, title: update.title, status: update.status, note: update.note };
-  // Pi runs an extension command at once, also during a run. The extension delivers the update when the run ends.
-  await session.pi.send({
-    type: "prompt",
-    message: `/pi-ui-task ${JSON.stringify({ text, details })}`,
-    streamingBehavior: "followUp",
-  });
-  release(session.file);
+  // Pi keeps a follow-up in its own queue, and the server cannot remove it from there. So the server holds the update
+  // until the orchestrator is idle. A newer update of the same task replaces the old one.
+  const queue = held.get(orchestrator.file) ?? new Map();
+  held.set(orchestrator.file, queue);
+  queue.delete(task);
+  queue.set(task, { path, update, text });
+  await deliver(orchestrator.file);
+}
+
+/** Send the next held update to the orchestrator in `file`, if it is idle. The update starts a turn of the orchestrator. */
+async function deliver(file: string): Promise<void> {
+  const queue = held.get(file);
+  if (!queue || inFlight.has(file) || sessions.get(file)?.state.running) return;
+  for (const [task, { path, update, text }] of queue) {
+    queue.delete(task);
+    // An update that is out of date must not open the session of the orchestrator.
+    if (task.status !== "review") continue;
+    // No await comes before this line, so a second call cannot send at the same time.
+    inFlight.add(file);
+    try {
+      const session = await open(path, file);
+      try {
+        // The task can be cancelled or run again while the session opens.
+        if (task.status === "review") {
+          const details = { id: update.id, title: update.title, status: update.status, note: update.note };
+          await session.pi.send({
+            type: "prompt",
+            message: `/pi-ui-task ${JSON.stringify({ text, details })}`,
+            streamingBehavior: "followUp",
+          });
+          return;
+        }
+      } finally {
+        // The session is idle again, so its warm timer starts again.
+        release(session.file);
+      }
+    } catch (error) {
+      // A failed send must not block the next updates.
+      inFlight.delete(file);
+      throw error;
+    }
+  }
+  inFlight.delete(file);
 }
 
 // The starts of tasks in progress: the setup, and the start of the subagent.
