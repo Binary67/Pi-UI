@@ -50,8 +50,9 @@ cannot be forked.
 
 The **X** of an orchestrator row removes the orchestrator from the sidebar, with the sessions of its tasks. When tasks
 are running or in review, the UI asks first, because their unfinished work is lost. The server cancels the active tasks:
-their subagents stop, and the worktrees and branches of their tasks are deleted. The session files stay. The **X** is hidden while
-the orchestrator runs. When you remove a project, its orchestrators are removed in the same way.
+their subagents stop, and the worktrees and branches of the tasks that have them are deleted. The session files stay.
+The **X** is hidden while the orchestrator runs. When you remove a project, its orchestrators are removed in the same
+way.
 
 1. You discuss the problem with the orchestrator. It splits the problem into tasks. A task is a title and a free-text
    prompt. The orchestrator delegates work that is large, that can run in parallel, or that would fill its context,
@@ -96,7 +97,7 @@ the orchestrator runs. When you remove a project, its orchestrators are removed 
 
 The orchestrator loads the Pi extension in `src/orchestrator/extension.ts`, with the instructions in
 `src/orchestrator/orchestrator.md`. Subagents get the instructions in `src/orchestrator/subagent.md`. They tell a
-subagent to skip the discussion step of an `AGENTS.md`, because the user already approved the plan.
+subagent to skip the discussion step of an `AGENTS.md`, because the orchestrator handles the approval of the user.
 
 Subagents use the default model of Pi. To use a different model, set `PI_UI_SUBAGENT_MODEL` in `.env` to a Pi
 `--model` pattern, such as `azure-foundry-claude/claude-sonnet-5-5:high`. Then restart both servers. The model applies
