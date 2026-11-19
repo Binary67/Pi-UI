@@ -40,16 +40,16 @@ const TOOLS = [
     name: "start_tasks",
     executionMode: "sequential" as const,
     label: "Start tasks",
-    promptSnippet: "Start tasks in parallel, each with its own subagent and git worktree",
+    promptSnippet: "Start tasks in parallel, each with its own subagent, with or without a git worktree",
     description:
-      "Start tasks in parallel. Each task gets a new git worktree and branch from the last commit of the project, and its own subagent. The project must be the top folder of a git repository without uncommitted changes. The owned files of active tasks must not overlap. A subagent does not see this conversation, so the contract and each task must stand alone.",
+      "Start tasks in parallel. Each task gets its own subagent. A task with worktree true gets a new git worktree and branch from the last commit of the project, and it goes through a review and a merge. A task with worktree false runs in the project folder, and Pi UI does not commit its changes. A subagent does not see this conversation, so each prompt must stand alone. When the run of a task ends, a task update arrives.",
     parameters: object(
       {
         contract: TEXT(
-          "The shared contract: the interfaces, types, names, file layout, and decisions that the tasks share. Each subagent gets it.",
+          "The shared contract: the interfaces, types, names, file layout, and decisions that the tasks share. Each subagent of this call gets it.",
         ),
         setup: TEXT(
-          "A shell command that prepares each new worktree before its subagent starts, such as `npm ci`. A worktree has no ignored files, such as dependencies or .env. Leave it out when the subagents need no setup.",
+          "A shell command that prepares each new worktree before its subagent starts, such as `npm ci`. It runs only in the worktree of a task with worktree true. A worktree has no ignored files, such as dependencies or .env. Leave it out when the subagents need no setup.",
         ),
         tasks: {
           type: "array",
@@ -57,23 +57,26 @@ const TOOLS = [
           items: object(
             {
               title: TEXT("A short title for the task board and the session list."),
-              goal: TEXT("What the task must do."),
+              prompt: TEXT(
+                "The whole task, as free text. The subagent does not see this conversation, so the prompt must stand alone.",
+              ),
+              worktree: {
+                type: "boolean",
+                description:
+                  "true: the task gets its own git worktree and branch from the last commit, with a review and a merge. The project must be the top folder of a git repository without uncommitted changes. false: the subagent runs in the project folder, and Pi UI does not commit its changes.",
+              },
               files: {
                 type: "array",
-                minItems: 1,
                 items: { type: "string" },
                 description:
-                  "The owned files: the only files that the subagent may change, relative to the project folder, without ./. A path that ends with / covers its folder.",
+                  "The owned files: the only files that the subagent may change, relative to the project folder, without ./. A path that ends with / covers its folder. The owned files of active tasks must not overlap. Leave it out when the task gives none.",
               },
-              inputs: TEXT("What the task can rely on: the existing code, and the parts of the contract that other tasks provide."),
-              outputs: TEXT("What the task must provide: functions, types, endpoints, or behavior, with exact names and signatures."),
-              criteria: TEXT("The acceptance criteria, with the checks that the subagent must run."),
             },
-            ["title", "goal", "files", "inputs", "outputs", "criteria"],
+            ["title", "prompt", "worktree"],
           ),
         },
       },
-      ["contract", "tasks"],
+      ["tasks"],
     ),
   },
   {
@@ -88,7 +91,7 @@ const TOOLS = [
     label: "Get task",
     promptSnippet: "Show the progress or the result of one task",
     description:
-      "Show one task: status, run time, worktree, branch, base commit, contract, added instructions, current tool, recent tool calls, changed files, changed files outside the owned files, the diff since the base commit, the latest text of the subagent, and cost. Use it to check progress and to review a task.",
+      "Show one task: status, run time, prompt, owned files, contract, added instructions, current tool, recent tool calls, the latest text of the subagent, and cost. For a task with a worktree, it also shows the worktree, branch, base commit, changed files, changed files outside the owned files, and the diff since the base commit. Use it to check progress and to review a task.",
     parameters: object({ id: ID }, ["id"]),
   },
   {
@@ -97,7 +100,7 @@ const TOOLS = [
     label: "Message task",
     promptSnippet: "Send instructions to the subagent of a task",
     description:
-      "Send instructions to the subagent of a running task or a task in review. For a running task, mode steer delivers the text after its current tool calls, and mode followUp delivers it when its run ends. For a task in review, the text starts a new run in the same session and worktree. During the setup, or for a task that could not start, the text is added to its prompt, and a task that could not start starts again. Done and cancelled tasks cannot get messages.",
+      "Send instructions to the subagent of a running task or a task in review. For a running task, mode steer delivers the text after its current tool calls, and mode followUp delivers it when its run ends. For a task in review, the text starts a new run in the same session, in the same worktree or project folder. During the setup, or for a task that could not start, the text is added to its prompt, and a task that could not start starts again. Done and cancelled tasks cannot get messages.",
     parameters: object(
       {
         id: ID,
@@ -115,9 +118,9 @@ const TOOLS = [
     name: "finish_task",
     executionMode: "sequential" as const,
     label: "Finish task",
-    promptSnippet: "Accept a merged task in review",
+    promptSnippet: "Close a task in review",
     description:
-      "Accept a task in review after you merged its branch into the current branch of the project. Pi UI checks the merge, stops the subagent, deletes the worktree and the branch, and marks the task done.",
+      "Close a task in review and mark it done. For a task with a worktree, call it after you merged its branch into the current branch of the project. Pi UI checks the merge, stops the subagent, and deletes the worktree and the branch. For a task without a worktree, it stops the subagent and closes the task.",
     parameters: object({ id: ID }, ["id"]),
   },
   {
@@ -126,7 +129,7 @@ const TOOLS = [
     label: "Cancel task",
     promptSnippet: "Cancel a task",
     description:
-      "Cancel a running task or a task in review. Its subagent stops, and its worktree and branch are deleted without a merge.",
+      "Cancel a running task or a task in review. Its subagent stops. A worktree and its branch are deleted without a merge.",
     parameters: object({ id: ID }, ["id"]),
   },
 ];
