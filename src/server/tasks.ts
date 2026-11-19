@@ -16,7 +16,7 @@ type ToolCall = Extract<AssistantMessage["content"][number], { type: "toolCall" 
 /** The git changes of a task since its base commit. `outside` has the changed files outside the owned files. */
 export type Changes = { files: string[]; outside: string[]; diff: string };
 
-/** True while the task has a worktree: it is running or in review. */
+/** True while the task is running or in review. */
 export function isActive(task: Task): boolean {
   return task.status === "running" || task.status === "review";
 }
@@ -44,17 +44,19 @@ export function outside(task: Pick<Task, "files">, files: string[]): string[] {
   return files.filter((file) => !task.files.some((owner) => covers(owner, file)));
 }
 
-/** The first prompt of a subagent: the contract of its task, with the instructions that the orchestrator added. */
+/** The first prompt of a subagent: its task, where it works, and the instructions that the orchestrator added. */
 export function taskPrompt(task: Task): string {
-  const sections = [
-    `# Task ${task.id}: ${task.title}`,
-    `## Shared contract\n\n${task.contract}`,
-    `## Goal\n\n${task.goal}`,
-    `## Owned files\n\nChange only these files. A path that ends with / covers its folder.\n\n${task.files.map((file) => `- ${file}`).join("\n")}`,
-    `## Inputs\n\n${task.inputs}`,
-    `## Outputs\n\n${task.outputs}`,
-    `## Acceptance criteria\n\n${task.criteria}`,
-  ];
+  const sections = [`# Task ${task.id}: ${task.title}`];
+  if (task.contract) sections.push(`## Shared contract\n\n${task.contract}`);
+  sections.push(`## Task\n\n${task.prompt}`);
+  if (task.files.length) {
+    const files = task.files.map((file) => `- ${file}`).join("\n");
+    sections.push(`## Owned files\n\nChange only these files. A path that ends with / covers its folder.\n\n${files}`);
+  }
+  const folder = task.worktree
+    ? `You work in a git worktree of the project, on the branch ${task.worktree.branch}. Other subagents work in parallel, in other worktrees. Pi UI commits your changes when your run ends.`
+    : "You work in the project folder itself. Other sessions can work in this folder at the same time. Pi UI does not commit your changes.";
+  sections.push(`## Work folder\n\n${folder}`);
   if (task.additions.length) sections.push(`## Additional instructions\n\n${task.additions.join("\n\n")}`);
   return sections.join("\n\n");
 }
@@ -95,7 +97,7 @@ function text(message: AssistantMessage): string {
 function report(state: ChatState): string {
   const message = state.messages.findLast((item) => item.role === "assistant");
   if (!message) return "(no answer)";
-  const parts = [cut(text(message), TEXT_LIMIT), message.errorMessage && `Error: ${message.errorMessage}`];
+  const parts = [text(message), message.errorMessage && `Error: ${message.errorMessage}`];
   return parts.filter(Boolean).join("\n\n") || "(no text)";
 }
 
@@ -138,7 +140,10 @@ export function describeTask(task: Task, state?: ChatState, cost?: number, chang
       : task.status;
   const lines = [`Task ${task.id}: ${task.title}`, `Status: ${status}`];
   if (task.note) lines.push(`Note: ${task.note}`);
-  if (changes) lines.push(`Worktree: ${task.worktree}`, `Branch: ${task.branch}`, `Base commit: ${task.base}`);
+  if (changes && task.worktree) {
+    const { dir, branch, base } = task.worktree;
+    lines.push(`Worktree: ${dir}`, `Branch: ${branch}`, `Base commit: ${base}`);
+  }
   lines.push("", "Instructions:", taskPrompt(task));
   if (state) {
     const calls = toolCalls(state);
@@ -166,14 +171,18 @@ export function describeTask(task: Task, state?: ChatState, cost?: number, chang
   return lines.join("\n");
 }
 
-/** The task update for the orchestrator, after a run of the task ended. `state` is absent when the task did not start. */
-export function updateText(task: Task, changes: Changes, state?: ChatState): string {
+/**
+ * The task update for the orchestrator, after a run of the task ended. `running` has the other tasks of the orchestrator
+ * that are running. `changes` is absent when the task has no worktree. `state` is absent when the task did not start.
+ */
+export function updateText(task: Task, running: Task[], changes?: Changes, state?: ChatState): string {
   return [
     `Task ${task.id} "${task.title}" is now in ${task.status}.`,
     task.note && `Note: ${task.note}`,
     task.direct && "The user sent messages to this subagent directly.",
-    `Branch: ${task.branch}`,
-    changesText(changes),
+    task.worktree && `Branch: ${task.worktree.branch}`,
+    changes && changesText(changes),
+    running.length && `Tasks that still run: ${running.map((item) => `${item.id}. ${item.title}`).join(", ")}`,
     state && `Last answer of the subagent:\n\n${report(state)}`,
   ]
     .filter(Boolean)

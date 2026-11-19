@@ -141,10 +141,13 @@ function sendToViewers(file: string, message: ServerMessage): void {
   for (const [socket, viewed] of views) if (viewed === file) send(socket, message);
 }
 
-/** The folder where `session` works: the worktree of its task while the task is running or in review, else its project. */
+/**
+ * The folder where `session` works: the worktree of its task while the task is running or in review, else its project.
+ * A task without a worktree works in its project.
+ */
 function sessionDir(session: Session): string {
   const task = findTask(session.file)?.task;
-  return task && isActive(task) ? task.worktree : session.cwd;
+  return task?.worktree && isActive(task) ? task.worktree.dir : session.cwd;
 }
 
 /** Send the branch of `session` to the page of `socket`. */
@@ -523,7 +526,7 @@ function followTask(session: Session, event: JsonAgentSessionEvent): void {
   broadcast(tasksMessage());
 }
 
-/** Move a running task to review. Then commit its changes, and send the task update to the orchestrator. */
+/** Move a running task to review. Then commit its changes if it has a worktree, and send the task update to the orchestrator. */
 function toReview(path: string, task: Task, note: string | undefined, state?: ChatState): void {
   Object.assign(task, { status: "review", note });
   // The update describes the task as it is now, also when the task changes during the commit.
@@ -537,16 +540,22 @@ function toReview(path: string, task: Task, note: string | undefined, state?: Ch
 
 /** Commit the changes of `task`, so that its branch is complete for the review and the merge. Then send `update`. */
 async function report(path: string, task: Task, update: Task, state?: ChatState): Promise<void> {
-  await commitAll(task.worktree, task.title).catch((error: unknown) => {
-    update.note = [update.note, `The server could not commit the changes: ${errorText(error)}`].filter(Boolean).join(" ");
-  });
-  await notify(path, task, update, updateText(update, await taskChanges(task), state));
+  if (task.worktree) {
+    await commitAll(task.worktree.dir, task.title).catch((error: unknown) => {
+      update.note = [update.note, `The server could not commit the changes: ${errorText(error)}`].filter(Boolean).join(" ");
+    });
+  }
+  const orchestrator = getOrchestrators(path).find((item) => item.tasks.includes(task));
+  const running = orchestrator?.tasks.filter((item) => item !== task && item.status === "running") ?? [];
+  await notify(path, task, update, updateText(update, running, await taskChanges(task), state));
 }
 
-/** The git changes of `task` in its worktree. */
-async function taskChanges(task: Task): Promise<Changes> {
-  const [files, diff] = await Promise.all([changedFiles(task.worktree, task.base), diffSince(task.worktree, task.base)]);
-  return { files, outside: outside(task, files), diff };
+/** The git changes of `task` in its worktree. Undefined when the task has no worktree. */
+async function taskChanges(task: Task): Promise<Changes | undefined> {
+  if (!task.worktree) return undefined;
+  const { dir, base } = task.worktree;
+  const [files, diff] = await Promise.all([changedFiles(dir, base), diffSince(dir, base)]);
+  return { files, outside: task.files.length ? outside(task, files) : [], diff };
 }
 
 /** Hold the task update `text` for the orchestrator of `task`. It goes out when the orchestrator is idle. */
@@ -617,19 +626,22 @@ function startTask(path: string, task: Task): void {
   );
 }
 
-/** Run the setup command of `task` in its worktree. Then start a new subagent session there, with the task prompt. */
+/**
+ * Run the setup command of `task` in its worktree. Then start a new subagent session in the worktree, or in the project
+ * folder when the task has no worktree, with the task prompt.
+ */
 async function launchTask(path: string, task: Task, signal: AbortSignal): Promise<void> {
   Object.assign(task, { status: "running", started: Date.now(), note: undefined });
   saveTasks();
   broadcast(tasksMessage());
   try {
-    if (task.setup) await runSetup(task.worktree, task.setup, signal);
+    if (task.worktree && task.setup) await runSetup(task.worktree.dir, task.setup, signal);
     // The task can be cancelled during its setup.
     if (task.status !== "running") return;
     // A session records its model, so only a new subagent session gets `--model`.
     const model = SUBAGENT_MODEL ? ["--model", SUBAGENT_MODEL] : [];
     const session = register(
-      await launch(path, undefined, [...SUBAGENT_ARGS, ...model, "--name", task.title], task.worktree),
+      await launch(path, undefined, [...SUBAGENT_ARGS, ...model, "--name", task.title], task.worktree?.dir),
     );
     task.file = session.file;
     saveTasks();
@@ -643,14 +655,16 @@ async function launchTask(path: string, task: Task, signal: AbortSignal): Promis
   broadcast(tasksMessage());
 }
 
-/** Stop the subagent of `task`, then delete its worktree and branch. The session moves to the project folder. */
+/** Stop the subagent of `task`. Then delete its worktree and branch, if it has them. The session moves to the project folder. */
 async function closeTask(path: string, task: Task): Promise<void> {
   // The worktree stays until the setup and the subagent have ended. A running setup command stops now.
   aborts.get(task)?.abort();
   await launches.get(task);
   if (task.file) await stopSession(task.file);
-  await removeWorktree(path, task.worktree, task.branch);
-  if (task.file) await moveSession(task.file, path);
+  if (task.worktree) {
+    await removeWorktree(path, task.worktree.dir, task.worktree.branch);
+    if (task.file) await moveSession(task.file, path);
+  }
 }
 
 /** Run `closeTask`. When it fails, the task goes back to review, so that `cancel_task` can try the cleanup again. */
@@ -663,10 +677,10 @@ async function closeOrBack(path: string, task: Task): Promise<void> {
   }
 }
 
-type TaskSpec = Pick<Task, "title" | "goal" | "files" | "inputs" | "outputs" | "criteria">;
+type TaskSpec = Pick<Task, "title" | "prompt"> & { worktree: boolean; files?: string[] };
 /** The parameters of the task tools. Pi checks them against the schemas of the extension, so each tool gets its own. */
 type ToolParams = {
-  contract: string;
+  contract?: string;
   setup?: string;
   tasks: TaskSpec[];
   id: number;
@@ -689,21 +703,28 @@ async function runTool(file: string, name: string, params: unknown): Promise<str
 async function taskTool(path: string, orchestrator: Orchestrator, name: string, params: ToolParams): Promise<string> {
   const { tasks } = orchestrator;
   if (name === "start_tasks") {
-    await checkRepo(path);
-    const conflict = overlap([...tasks.filter(isActive), ...params.tasks]);
+    if (params.tasks.some((spec) => spec.worktree)) await checkRepo(path);
+    const conflict = overlap([...tasks.filter(isActive), ...params.tasks.map(({ title, files = [] }) => ({ title, files }))]);
     if (conflict) throw new Error(`The owned files overlap: ${conflict}. A file can belong to only one active task.`);
     // Phase 1 makes all worktrees. When one fails, none of the tasks starts.
     const first = Math.max(0, ...tasks.map((task) => task.id)) + 1;
     const made: Task[] = [];
-    const undo = () => Promise.all(made.map((task) => removeWorktree(path, task.worktree, task.branch).catch(() => {})));
+    const undo = () =>
+      Promise.all(made.flatMap(({ worktree }) => (worktree ? [removeWorktree(path, worktree.dir, worktree.branch).catch(() => {})] : [])));
     for (const [index, spec] of params.tasks.entries()) {
       const id = first + index;
-      const worktree = join(WORKTREES_DIR, orchestrator.id, `task-${id}`);
-      const branch = `pi-ui/${orchestrator.id}/task-${id}`;
+      const { title, prompt, files = [] } = spec;
+      const { contract } = params;
+      const task: Task = { id, title, status: "running", prompt, files, additions: [] };
+      if (contract) task.contract = contract;
       try {
-        const base = await addWorktree(path, worktree, branch);
-        const { contract, setup } = params;
-        made.push({ ...spec, id, status: "running", contract, setup, additions: [], worktree, branch, base });
+        if (spec.worktree) {
+          const dir = join(WORKTREES_DIR, orchestrator.id, `task-${id}`);
+          const branch = `pi-ui/${orchestrator.id}/task-${id}`;
+          task.worktree = { dir, branch, base: await addWorktree(path, dir, branch) };
+          task.setup = params.setup;
+        }
+        made.push(task);
       } catch (error) {
         await undo();
         throw new Error(`The task "${spec.title}" could not start: ${errorText(error)}`);
@@ -740,7 +761,7 @@ async function taskTool(path: string, orchestrator: Orchestrator, name: string, 
     case "message_task": {
       if (!isActive(task)) throw new Error(`Task ${task.id} is ${task.status}. Propose a new task instead.`);
       task.additions.push(params.text);
-      // A task without a session runs its setup now, or could not start.
+      // A task without a session runs its setup now (if it has a worktree), or could not start.
       if (!task.file) {
         if (task.status === "running") return `Added to the prompt of task ${task.id}. Its subagent gets it after the setup.`;
         startTask(path, task);
@@ -752,22 +773,25 @@ async function taskTool(path: string, orchestrator: Orchestrator, name: string, 
     }
     case "finish_task": {
       if (task.status !== "review") throw new Error(`Task ${task.id} is ${task.status}. Only a task in review can finish.`);
-      // Changes after the last commit, such as from a server restart, need a review and a merge too.
-      if (await commitAll(task.worktree, task.title)) {
-        throw new Error(`Task ${task.id} had uncommitted changes. They are now on ${task.branch}. Review and merge them first.`);
-      }
-      if (!(await isMerged(path, task.branch))) {
-        throw new Error(`${task.branch} is not merged. Merge it into the current branch of the project first.`);
+      if (task.worktree) {
+        const { dir, branch } = task.worktree;
+        // Changes after the last commit, such as from a server restart, need a review and a merge too.
+        if (await commitAll(dir, task.title)) {
+          throw new Error(`Task ${task.id} had uncommitted changes. They are now on ${branch}. Review and merge them first.`);
+        }
+        if (!(await isMerged(path, branch))) {
+          throw new Error(`${branch} is not merged. Merge it into the current branch of the project first.`);
+        }
       }
       Object.assign(task, { status: "done", note: undefined });
       await closeOrBack(path, task);
-      return `Task ${task.id} is done. Its worktree and branch are deleted.`;
+      return task.worktree ? `Task ${task.id} is done. Its worktree and branch are deleted.` : `Task ${task.id} is done.`;
     }
     case "cancel_task": {
       if (!isActive(task)) throw new Error(`Task ${task.id} is already ${task.status}.`);
       task.status = "cancelled";
       await closeOrBack(path, task);
-      return `Task ${task.id} is cancelled. Its worktree and branch are deleted.`;
+      return task.worktree ? `Task ${task.id} is cancelled. Its worktree and branch are deleted.` : `Task ${task.id} is cancelled.`;
     }
   }
   throw new Error(`Unknown task tool: ${name}`);
@@ -870,7 +894,7 @@ async function handle(socket: WebSocket, message: ClientMessage): Promise<void> 
       return broadcastProjects();
   }
   const task = findTask(message.file)?.task;
-  // A done or cancelled task has no worktree. Its subagent would change the project folder directly.
+  // A done or cancelled task has no worktree any more. Its subagent would change the project folder directly.
   if (message.type === "prompt" && task && !isActive(task)) {
     throw new Error(`This task is ${task.status}. Ask the orchestrator for a new task.`);
   }
@@ -902,7 +926,7 @@ async function handle(socket: WebSocket, message: ClientMessage): Promise<void> 
     case "list_branches":
       return sendBranch(socket, session);
     case "switch_branch": {
-      if (task) throw new Error("A task session stays on its task branch.");
+      if (task) throw new Error("A task session cannot switch the branch.");
       if ([...sessions.values()].some((other) => other.cwd === session.cwd && other.state.running)) {
         throw new Error("A session of this project is running. Wait until it ends.");
       }
@@ -938,7 +962,9 @@ async function handle(socket: WebSocket, message: ClientMessage): Promise<void> 
 await removeLeftovers(
   WORKTREES_DIR,
   projectPaths(),
-  allTasks().flatMap(([, tasks]) => tasks.filter(isActive)),
+  allTasks().flatMap(([, tasks]) =>
+    tasks.flatMap((task) => (isActive(task) && task.worktree ? [{ worktree: task.worktree.dir, branch: task.worktree.branch }] : [])),
+  ),
 );
 
 const server = new WebSocketServer({
