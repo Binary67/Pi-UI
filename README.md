@@ -49,32 +49,50 @@ The **X** of a child row is hidden while its task is running or in review. An or
 cannot be forked.
 
 The **X** of an orchestrator row removes the orchestrator from the sidebar, with the sessions of its tasks. When tasks
-are running or in review, the UI asks first, because their unmerged work is lost. The server cancels the active tasks:
-their subagents stop, and their worktrees and branches are deleted. The session files stay. The **X** is hidden while
+are running or in review, the UI asks first, because their unfinished work is lost. The server cancels the active tasks:
+their subagents stop, and the worktrees and branches of their tasks are deleted. The session files stay. The **X** is hidden while
 the orchestrator runs. When you remove a project, its orchestrators are removed in the same way.
 
-1. You discuss the problem with the orchestrator. It splits the problem into tasks, and writes a contract: a shared
-   contract for all tasks, and for each task the goal, the owned files, the inputs, the outputs, and the acceptance
-   criteria. A file belongs to only one active task.
-2. After you agree, the orchestrator starts the tasks in parallel. Each task gets a new git worktree in
-   `~/.pi-ui/worktrees/<orchestrator id>/task-<task id>` and a new branch from the last commit. The server runs the
-   setup command of the plan in the worktree, such as `npm ci`, and then starts the subagent there.
-3. When a subagent run ends, the server commits the changes on the task branch. The task goes to review, and the
-   orchestrator gets a task update with the changed files. The update also lists the changed files outside the owned
-   files. The server holds the updates while the orchestrator runs, and sends them one at a time when it is idle. It
-   drops an update when its task has left review in the meantime, for example after `cancel_task`.
-4. The orchestrator reviews the branch, and sends corrections or merges it with `git`. After the merge, it accepts the
-   task. The server then stops the subagent and deletes the worktree and the branch. It also deletes them when the
-   orchestrator cancels a task, when you remove the orchestrator, or when you remove the project. If the cleanup of a
-   task fails, the task goes back to review, and `cancel_task` tries the cleanup again.
+1. You discuss the problem with the orchestrator. It splits the problem into tasks. A task is a title and a free-text
+   prompt. The orchestrator delegates work that is large, that can run in parallel, or that would fill its context,
+   such as research, review, analysis, and code changes. It does quick lookups itself. It never edits files.
+2. The orchestrator decides for each task if it gets a git worktree. It uses a worktree when two or more tasks change
+   project files at the same time, or when a change needs a review before it enters the project branch. It uses no
+   worktree for a task that changes nothing, or when the project is not a git repository.
+3. Tasks that must fit together get a shared contract: interfaces, types, names, and decisions. The prompt of each task
+   has the goal, the owned files, the inputs, the outputs, and the acceptance criteria with the checks to run. A
+   subagent does not see the conversation, so a prompt must stand alone. Owned files are optional. A file belongs to
+   only one active task. Two tasks that need the same file run one after the other.
+4. A task that changes files starts only after you agree to the plan: the prompts, the contract, and the setup command.
+   A task that changes nothing, such as research, can start without approval. Its prompt says `Do not change files.`
+5. A task with a worktree gets a new git worktree in `~/.pi-ui/worktrees/<orchestrator id>/task-<task id>` and a new
+   branch from the last commit. The server runs the setup command of the plan in the worktree, such as `npm ci`, and
+   then starts the subagent there. When a run ends, the server commits the changes on the task branch. The task goes
+   to review. The orchestrator reviews the branch, and sends corrections or merges it with `git`. After the merge, it
+   accepts the task with `finish_task`. The server then stops the subagent and deletes the worktree and the branch.
+   It also deletes them when the orchestrator cancels a task, when you remove the orchestrator, or when you remove the
+   project. If the cleanup of a task fails, the task goes back to review, and `cancel_task` tries the cleanup again.
+6. A task without a worktree starts the subagent in the project folder. The server makes no commit and reads no diff.
+   When a run ends, the task goes to review, and the orchestrator gets the answer of the subagent. The orchestrator
+   closes the task with `finish_task`. The changes stay uncommitted in the project folder. The orchestrator reviews
+   them with `git status` and `git diff`, and commits them only when the approved plan says so.
+7. Each task update has the full last answer of the subagent and the tasks that still run. For a task with a worktree,
+   it also has the branch and the changed files, with the changed files outside the owned files. The server holds the
+   updates while the orchestrator runs, and sends them one at a time when it is idle. It drops an update when its task
+   has left review in the meantime, for example after `cancel_task`. The orchestrator waits for the tasks that still
+   run when it needs their results. It does not poll.
 
 - At startup, the server deletes each worktree folder and each `pi-ui/*` branch that no running task or task in review
   owns. This removes what a crash or a failed cleanup left behind.
-- The project must be the top folder of a git repository, with at least one commit and no uncommitted changes.
+- A task with a worktree needs a project that is the top folder of a git repository, with at least one commit and no
+  uncommitted changes. A task without a worktree has no such need. A project with uncommitted changes from a task
+  without a worktree cannot start a task with a worktree until you commit or discard them.
 - The task board on the right shows the tasks of the orchestrator on the page, or of the orchestrator of the subagent
   session on the page. A click on a card opens the session of its task. You can type in the session of a running task
   or a task in review. A done or cancelled task accepts no prompts.
-- The orchestrator has read tools, `bash` for git and checks, and its task tools. It does not edit files.
+- The orchestrator has read tools, `bash` for git, merges, and checks, and its task tools. It does not edit files.
+- Subagents have all tools. There are no agent types: the prompt of a task gives the role of its subagent. Only an
+  orchestrator can start subagents.
 
 The orchestrator loads the Pi extension in `src/orchestrator/extension.ts`, with the instructions in
 `src/orchestrator/orchestrator.md`. Subagents get the instructions in `src/orchestrator/subagent.md`. They tell a
@@ -96,7 +114,8 @@ all of them. A switch is blocked while a session of the project runs, or while
 an orchestrator of the project has tasks that are running or in review. The
 picker is then disabled, and its tooltip gives the reason.
 
-A subagent session of a task shows its task branch. It allows no change.
+A subagent session of a task shows the branch of its work folder: the task branch for a task with a worktree, and
+the project branch for a task without one. It allows no change.
 
 ## Remote access with Tailscale
 

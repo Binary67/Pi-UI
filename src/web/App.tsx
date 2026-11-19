@@ -597,7 +597,7 @@ export function App() {
   let branchBlock: string | null = null;
   if (session) {
     if (taskSession) {
-      branchBlock = "A task session stays on its task branch.";
+      branchBlock = "A task session cannot switch the branch.";
     } else if (
       sessionProject &&
       [...sessionProject.sessions, ...sessionProject.orchestrators].some((item) => statuses[item.file] === "running")
