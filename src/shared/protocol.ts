@@ -83,7 +83,7 @@ export type SessionStatus = "running" | "warm";
 /** The orchestrator sessions of a project, newest first. They are not in `sessions`. */
 export type Project = { path: string; sessions: SessionSummary[]; orchestrators: SessionSummary[] };
 
-/** The tasks of an orchestrator run in parallel. A task that is `running` or in `review` has its own git worktree. */
+/** The tasks of an orchestrator run in parallel. A task is active while it is `running` or in `review`. A task with a worktree keeps it during that time. */
 export type TaskStatus = "running" | "review" | "done" | "cancelled";
 
 /** A task of an orchestrator, as the task board shows it. */

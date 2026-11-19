@@ -63,7 +63,7 @@ export function TaskBoard({ tasks, active, open, onOpen, onClose, onOrchestrator
             ))}
         </ol>
       ) : (
-        <p className="board-empty">The orchestrator adds tasks here after you approve a plan.</p>
+        <p className="board-empty">The orchestrator adds tasks here.</p>
       )}
     </aside>
   );
