@@ -8,26 +8,22 @@ import { listSessions } from "./session-files.ts";
 const FILE = join(homedir(), ".pi-ui", "projects.json");
 
 /**
- * A task of an orchestrator: its contract, and the git worktree where its subagent works. `additions` are the
- * instructions that the orchestrator sent to the subagent.
+ * A task of an orchestrator: its prompt, and where its subagent works. A task with a worktree works in its own git
+ * worktree. A task without one works in the project folder. `additions` are the instructions that the orchestrator sent
+ * to the subagent.
  */
 export type Task = Omit<TaskSummary, "activity"> & {
-  goal: string;
-  /** The owned files: the only files that the subagent may change. A path that ends with `/` covers its folder. */
+  /** The task, as free text. */
+  prompt: string;
+  /** The owned files. Empty when the task gives none. */
   files: string[];
-  inputs: string;
-  outputs: string;
-  criteria: string;
   /** The shared contract of the tasks that started together. */
-  contract: string;
-  /** The shell command that prepares the worktree before the subagent starts. */
+  contract?: string;
+  /** The shell command that prepares the worktree. Only a task with a worktree has it. */
   setup?: string;
   additions: string[];
-  /** The worktree folder and its branch. Both exist while the task is running or in review. */
-  worktree: string;
-  branch: string;
-  /** The commit that the branch starts from. */
-  base: string;
+  /** The worktree folder, its branch, and the commit that the branch starts from. Absent when the subagent works in the project folder. */
+  worktree?: { dir: string; branch: string; base: string };
   /** When the last run of the task started. */
   started?: number;
   /** True when the user sent a message to the subagent after the last task update. */
