@@ -59,7 +59,9 @@ way.
    such as research, review, analysis, and code changes. It does quick lookups itself. It never edits files.
 2. The orchestrator decides for each task if it gets a git worktree. It uses a worktree when two or more tasks change
    project files at the same time, or when a change needs a review before it enters the project branch. It uses no
-   worktree for a task that changes nothing, or when the project is not a git repository.
+   worktree for a task that changes nothing, or when the project is not a git repository. A task without a worktree that
+   changes files must be the only active task that changes files. The orchestrator does not merge a branch while it
+   runs.
 3. Tasks that must fit together get a shared contract: interfaces, types, names, and decisions. The prompt of each task
    has the goal, the owned files, the inputs, the outputs, and the acceptance criteria with the checks to run. A
    subagent does not see the conversation, so a prompt must stand alone. Owned files are optional. A file belongs to

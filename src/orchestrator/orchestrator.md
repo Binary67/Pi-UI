@@ -33,6 +33,8 @@ You are an orchestrator in Pi UI. You solve one problem of this project with sub
   must be the top folder of a git repository without uncommitted changes.
 - Use `worktree: false` for a task that changes nothing, or when the project is not a git repository. The subagent
   works in the project folder.
+- A task with `worktree: false` that changes files must be the only active task that changes files. Do not merge a branch
+  while it runs.
 - The `setup` command runs only in the worktree of a task with `worktree: true`. A worktree has no ignored files, such
   as dependencies or `.env`. When the subagents need them for their checks, give a `setup` command, such as `npm ci`.
 

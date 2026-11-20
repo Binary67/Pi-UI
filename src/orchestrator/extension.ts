@@ -129,7 +129,7 @@ const TOOLS = [
     label: "Cancel task",
     promptSnippet: "Cancel a task",
     description:
-      "Cancel a running task or a task in review. Its subagent stops. A worktree and its branch are deleted without a merge.",
+      "Cancel a running task or a task in review. Its subagent stops. A worktree and its branch are deleted without a merge. The changes of a task without a worktree stay in the project folder.",
     parameters: object({ id: ID }, ["id"]),
   },
 ];

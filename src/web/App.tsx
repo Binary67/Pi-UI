@@ -394,7 +394,7 @@ export function App() {
     );
     return (
       !active ||
-      confirm("Tasks of the orchestrator are still running or in review. Their unmerged work will be lost. Continue?")
+      confirm("Tasks of the orchestrator are still running or in review. Their unfinished work will be lost. Continue?")
     );
   }
 
