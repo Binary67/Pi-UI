@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ChatState } from "../shared/chat-state.ts";
 import type { Task } from "./projects.ts";
-import { outside, overlap, taskPrompt, updateText } from "./tasks.ts";
+import { outside, overlap, runningText, taskPrompt, updateText } from "./tasks.ts";
 
 function task(id: number, additions: string[] = []): Task {
   return {
@@ -76,23 +76,27 @@ test("the added instructions are the last section", () => {
   assert.ok(taskPrompt(plain(2, ["Also A."])).endsWith("## Work folder\n\nYou work in the project folder itself. Other sessions can work in this folder at the same time. Pi UI does not commit your changes.\n\n## Additional instructions\n\nAlso A."));
 });
 
-test("the task update lists the tasks that still run", () => {
-  const text = updateText(task(1), [plain(2), plain(3)], { files: ["src/a.ts"], outside: [], diff: "" });
+test("the task update has the branch and the changed files", () => {
+  const text = updateText(task(1), { files: ["src/a.ts"], outside: [], diff: "" });
   assert.ok(text.startsWith(`Task 1 "Task 1" is now in review.`));
   assert.ok(text.includes("Branch: pi-ui/x/task-1"));
   assert.ok(text.includes("Changed files: src/a.ts"));
-  assert.ok(text.includes("Tasks that still run: 2. Task 2, 3. Task 3"));
-  assert.ok(!updateText(task(1), []).includes("Tasks that still run"));
+  assert.ok(!text.includes("Tasks that still run"));
+});
+
+test("the running text lists the tasks that still run", () => {
+  assert.equal(runningText([plain(2), plain(3)]), "Tasks that still run: 2. Task 2, 3. Task 3");
+  assert.equal(runningText([]), undefined);
 });
 
 test("the task update of a task without a worktree has no branch and no changed files", () => {
-  const text = updateText(plain(2), [plain(3)], undefined, answer("Done."));
-  assert.equal(text, `Task 2 "Task 2" is now in review.\n\nTasks that still run: 3. Task 3\n\nLast answer of the subagent:\n\nDone.`);
+  const text = updateText(plain(2), undefined, answer("Done."));
+  assert.equal(text, `Task 2 "Task 2" is now in review.\n\nLast answer of the subagent:\n\nDone.`);
   assert.ok(!text.includes("Branch:"));
   assert.ok(!text.includes("hanged files"));
 });
 
 test("the task update does not cut a long last answer", () => {
   const long = "x".repeat(5000);
-  assert.ok(updateText(plain(2), [], undefined, answer(long)).endsWith(`\n\n${long}`));
+  assert.ok(updateText(plain(2), undefined, answer(long)).endsWith(`\n\n${long}`));
 });

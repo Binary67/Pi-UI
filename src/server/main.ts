@@ -44,6 +44,7 @@ import {
   isActive,
   outside,
   overlap,
+  runningText,
   taskLine,
   taskPrompt,
   updateText,
@@ -545,9 +546,7 @@ async function report(path: string, task: Task, update: Task, state?: ChatState)
       update.note = [update.note, `The server could not commit the changes: ${errorText(error)}`].filter(Boolean).join(" ");
     });
   }
-  const orchestrator = getOrchestrators(path).find((item) => item.tasks.includes(task));
-  const running = orchestrator?.tasks.filter((item) => item !== task && item.status === "running") ?? [];
-  await notify(path, task, update, updateText(update, running, await taskChanges(task), state));
+  await notify(path, task, update, updateText(update, await taskChanges(task), state));
 }
 
 /** The git changes of `task` in its worktree. Undefined when the task has no worktree. */
@@ -588,9 +587,12 @@ async function deliver(file: string): Promise<void> {
         // The task can be cancelled or run again while the session opens.
         if (task.status === "review") {
           const details = { id: update.id, title: update.title, status: update.status, note: update.note };
+          // The list of the other running tasks is built now, because the update can be held for a long time.
+          const others = findOrchestrator(file)?.orchestrator.tasks.filter((item) => item !== task && item.status === "running");
+          const full = [text, runningText(others ?? [])].filter(Boolean).join("\n\n");
           await session.pi.send({
             type: "prompt",
-            message: `/pi-ui-task ${JSON.stringify({ text, details })}`,
+            message: `/pi-ui-task ${JSON.stringify({ text: full, details })}`,
             streamingBehavior: "followUp",
           });
           return;

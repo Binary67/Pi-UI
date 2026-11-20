@@ -2,8 +2,6 @@ import type { ChatState } from "../shared/chat-state.ts";
 import type { AgentMessage, AssistantMessage } from "../shared/pi-rpc.ts";
 import type { Task } from "./projects.ts";
 
-/** The longest text from a subagent that the orchestrator gets, in characters. A longer text keeps its end. */
-const TEXT_LIMIT = 4000;
 /** The longest diff text of one task view, in characters. A longer text keeps its end. */
 const DIFF_LIMIT = 10000;
 /** The number of recent tool calls in a task view. */
@@ -165,26 +163,31 @@ export function describeTask(task: Task, state?: ChatState, cost?: number, chang
   }
   if (state) {
     const latest = messages(state).findLast((message) => message.role === "assistant" && text(message));
-    if (latest?.role === "assistant") lines.push("", "Latest assistant text:", cut(text(latest), TEXT_LIMIT));
+    if (latest?.role === "assistant") lines.push("", "Latest assistant text:", text(latest));
   }
   if (cost !== undefined) lines.push("", `Cost: $${cost.toFixed(2)}`);
   return lines.join("\n");
 }
 
 /**
- * The task update for the orchestrator, after a run of the task ended. `running` has the other tasks of the orchestrator
- * that are running. `changes` is absent when the task has no worktree. `state` is absent when the task did not start.
+ * The task update for the orchestrator, after a run of the task ended. `changes` is absent when the task has no
+ * worktree. `state` is absent when the task did not start.
  */
-export function updateText(task: Task, running: Task[], changes?: Changes, state?: ChatState): string {
+export function updateText(task: Task, changes?: Changes, state?: ChatState): string {
   return [
     `Task ${task.id} "${task.title}" is now in ${task.status}.`,
     task.note && `Note: ${task.note}`,
     task.direct && "The user sent messages to this subagent directly.",
     task.worktree && `Branch: ${task.worktree.branch}`,
     changes && changesText(changes),
-    running.length && `Tasks that still run: ${running.map((item) => `${item.id}. ${item.title}`).join(", ")}`,
     state && `Last answer of the subagent:\n\n${report(state)}`,
   ]
     .filter(Boolean)
     .join("\n\n");
+}
+
+/** The line with the tasks of `running` for the end of a task update. Undefined when no task runs. */
+export function runningText(running: Task[]): string | undefined {
+  if (!running.length) return undefined;
+  return `Tasks that still run: ${running.map((item) => `${item.id}. ${item.title}`).join(", ")}`;
 }
