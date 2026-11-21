@@ -32,6 +32,15 @@ export function SendButton({ running, ready, onSend, onStop }: SendButtonProps) 
     setHolding(false);
   }
 
+  // An unmount must not leave a timer that stops the run or sets state.
+  useEffect(
+    () => () => {
+      clearTimeout(holdRef.current);
+      clearTimeout(hintRef.current);
+    },
+    [],
+  );
+
   // A run that ends during a hold cancels the hold.
   useEffect(() => {
     if (!running) cancel();

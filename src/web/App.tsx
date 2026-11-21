@@ -193,8 +193,13 @@ export function App() {
         send({ type: "list_folders", path: "" });
         const view = localStorage.getItem(VIEW_KEY);
         if (view) {
-          const { cwd, file } = JSON.parse(view) as { cwd: string; file: string };
-          send({ type: "start", cwd, file });
+          try {
+            const { cwd, file } = JSON.parse(view) as { cwd: string; file: string };
+            send({ type: "start", cwd, file });
+          } catch {
+            // A corrupt saved view must not stop the ping timer.
+            localStorage.removeItem(VIEW_KEY);
+          }
         }
         pingTimer = setInterval(ping, PING_MS);
       };
@@ -203,7 +208,12 @@ export function App() {
         // Each message shows that the socket is alive, also a large one that arrives after the ping.
         clearTimeout(pongTimer);
         pongTimer = undefined;
-        const data = JSON.parse(message.data) as ServerMessage;
+        let data: ServerMessage;
+        try {
+          data = JSON.parse(message.data) as ServerMessage;
+        } catch {
+          return;
+        }
         switch (data.type) {
           case "remote":
             setRemoteUrl(data.url);

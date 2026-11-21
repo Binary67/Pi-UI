@@ -52,6 +52,15 @@ const REHYPE_PLUGINS = [rehypeHighlight];
 
 const MARKDOWN_COMPONENTS: Components = {
   a: ({ node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
+  // A remote image loads with no click, so model output could leak data through its URL. Only `data:` images load.
+  img: ({ node, src, alt }) =>
+    typeof src === "string" && src.startsWith("data:") ? (
+      <img src={src} alt={alt} />
+    ) : (
+      <a href={typeof src === "string" ? src : undefined} target="_blank" rel="noreferrer">
+        {alt || src}
+      </a>
+    ),
   pre: ({ node, children }) => {
     const code = node?.children[0];
     const className = code?.type === "element" ? String(code.properties.className ?? "") : "";
@@ -288,7 +297,7 @@ function UserImages({ images }: { images: PromptImage[] }) {
 /** A task update in the orchestrator chat: one row with the task and its status. A click shows the full update. */
 function TaskUpdate({ message }: { message: CustomMessage }) {
   const [open, setOpen] = useState(false);
-  const { id, title, status } = message.details as Pick<TaskSummary, "id" | "title" | "status">;
+  const { id, title, status } = (message.details ?? {}) as Pick<TaskSummary, "id" | "title" | "status">;
   const text =
     typeof message.content === "string"
       ? message.content
