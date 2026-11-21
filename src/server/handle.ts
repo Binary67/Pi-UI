@@ -26,14 +26,13 @@ import {
   dropSpare,
   held,
   inFlight,
-  launch,
   open,
   opening,
-  ORCHESTRATOR_ARGS,
-  prepareSpare,
+  prepareSpares,
   register,
   release,
   stopSession,
+  takeSpare,
   WORKTREES_DIR,
 } from "./sessions.ts";
 import { clients, sessions, views } from "./state.ts";
@@ -81,7 +80,7 @@ async function start(socket: WebSocket, folder: string, file?: string): Promise<
     sendBranch(socket, session).catch((error: unknown) => console.error("Could not read the branch:", error));
   }
   if (previous) release(previous);
-  prepareSpare(cwd);
+  prepareSpares(cwd);
 }
 
 /**
@@ -100,7 +99,7 @@ async function startOrchestrator(socket: WebSocket, folder: string): Promise<voi
   );
   if (empty) return start(socket, cwd, empty.file);
   send(socket, { type: "starting" });
-  const { file } = register(await launch(cwd, undefined, ORCHESTRATOR_ARGS));
+  const { file } = register(await takeSpare("orchestrator", cwd));
   addOrchestrator(cwd, file);
   await broadcastProjects();
   return start(socket, cwd, file);
