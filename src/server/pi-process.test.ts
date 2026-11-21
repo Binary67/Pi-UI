@@ -185,3 +185,40 @@ setInterval(() => {}, 1000);
   assert.equal(pi.exited, true);
   await pi.stop(200);
 });
+
+test("a line that is not JSON does not throw, and the records after it still arrive", { timeout: 5000 }, async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-ui-fake-pi-stray-"));
+  await writeFile(join(dir, "pi"), `#!${process.execPath}
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  let newline;
+  while ((newline = buffer.indexOf("\\n")) !== -1) {
+    const command = JSON.parse(buffer.slice(0, newline));
+    buffer = buffer.slice(newline + 1);
+    if (command.type !== "get_state") continue;
+    process.stdout.write("stray text\\n");
+    process.stdout.write(JSON.stringify({ type: "queue_update", steering: ["a"], followUp: [] }) + "\\n");
+    process.stdout.write(JSON.stringify({ type: "response", command: command.type, id: command.id, success: true, data: {} }) + "\\n");
+  }
+});
+`, { mode: 0o755 });
+  const events: JsonAgentSessionEvent[] = [];
+  const path = process.env.PATH;
+  let pi: PiProcess;
+  try {
+    process.env.PATH = dir;
+    pi = new PiProcess(dir, [], (event) => events.push(event), () => {});
+  } finally {
+    if (path === undefined) delete process.env.PATH;
+    else process.env.PATH = path;
+  }
+  t.after(async () => {
+    await pi.stop();
+    await rm(dir, { recursive: true, force: true });
+  });
+  t.mock.method(console, "error", () => {});
+  await pi.send({ type: "get_state" });
+  assert.deepEqual(events, [{ type: "queue_update", steering: ["a"], followUp: [] }]);
+});

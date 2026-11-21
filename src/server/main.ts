@@ -15,6 +15,7 @@ import type {
   StreamingBehavior,
   TaskSummary,
 } from "../shared/protocol.ts";
+import { parseClientMessage } from "./client-message.ts";
 import { PiProcess } from "./pi-process.ts";
 import {
   addOrchestrator,
@@ -86,6 +87,10 @@ const WARM_MS = 10 * 60 * 1000;
 const HEARTBEAT_MS = 30 * 1000;
 // A transcription that takes longer than this fails, so the composer does not wait for ever.
 const TRANSCRIBE_TIMEOUT_MS = 60 * 1000;
+// The largest message from a page. A voice recording or an image in a prompt arrives as base64 in one message.
+const MAX_MESSAGE_BYTES = 32 * 1024 * 1024;
+// The recording types that `transcribe` accepts, without parameters such as `;codecs=opus`.
+const AUDIO_TYPES = new Set(["audio/webm", "audio/ogg", "audio/mp4"]);
 
 // The Pi extension with the task tools, and the instructions of the orchestrator and its subagents.
 const ORCHESTRATOR_DIR = fileURLToPath(new URL("../orchestrator/", import.meta.url));
@@ -502,8 +507,9 @@ async function stopSession(file: string): Promise<void> {
     sessions.delete(file);
     broadcast(statusMessage());
     if (session.state.running) {
-      await session.pi.send({ type: "clear_queue" });
-      await session.pi.send({ type: "abort" });
+      // A Pi process that has died rejects both commands. The process stops next anyway.
+      await session.pi.send({ type: "clear_queue" }).catch(() => {});
+      await session.pi.send({ type: "abort" }).catch(() => {});
     }
     stopping.set(file, session.pi.stop().finally(() => stopping.delete(file)));
   }
@@ -713,28 +719,25 @@ async function closeOrBack(path: string, task: Task): Promise<void> {
 
 type TaskSpec = Pick<Task, "title" | "prompt"> & { worktree: boolean; files?: string[] };
 /** The parameters of the task tools. Pi checks them against the schemas of the extension, so each tool gets its own. */
-type ToolParams = {
-  contract?: string;
-  setup?: string;
-  tasks: TaskSpec[];
-  id: number;
-  text: string;
-  mode: StreamingBehavior;
-};
+type ToolCall =
+  | { name: "start_tasks"; params: { contract?: string; setup?: string; tasks: TaskSpec[] } }
+  | { name: "list_tasks"; params: Record<string, never> }
+  | { name: "get_task" | "finish_task" | "cancel_task"; params: { id: number } }
+  | { name: "message_task"; params: { id: number; text: string; mode: StreamingBehavior } };
 
 /** Run the task tool `name` for the orchestrator in `file`. Returns the text for the model. */
 async function runTool(file: string, name: string, params: unknown): Promise<string> {
   const found = findOrchestrator(file);
   if (!found) throw new Error("Only an orchestrator can use the task tools.");
   try {
-    return await taskTool(found.path, found.orchestrator, name, params as ToolParams);
+    return await taskTool(found.path, found.orchestrator, { name, params } as ToolCall);
   } finally {
     saveTasks();
     broadcast(tasksMessage());
   }
 }
 
-async function taskTool(path: string, orchestrator: Orchestrator, name: string, params: ToolParams): Promise<string> {
+async function taskTool(path: string, orchestrator: Orchestrator, { name, params }: ToolCall): Promise<string> {
   const { tasks } = orchestrator;
   if (name === "start_tasks") {
     if (params.tasks.some((spec) => spec.worktree)) await checkRepo(path);
@@ -780,6 +783,9 @@ async function taskTool(path: string, orchestrator: Orchestrator, name: string, 
       return taskLine(task, session?.state, session?.info.stats.cost);
     });
     return lines.join("\n") || "No tasks.";
+  }
+  if (name !== "get_task" && name !== "message_task" && name !== "finish_task" && name !== "cancel_task") {
+    throw new Error(`Unknown task tool: ${name}`);
   }
   const task = tasks.find((item) => item.id === params.id);
   if (!task) throw new Error(`Task ${params.id} does not exist.`);
@@ -829,7 +835,6 @@ async function taskTool(path: string, orchestrator: Orchestrator, name: string, 
       return task.worktree ? `Task ${task.id} is cancelled. Its worktree and branch are deleted.` : `Task ${task.id} is cancelled.`;
     }
   }
-  throw new Error(`Unknown task tool: ${name}`);
 }
 
 /** A typed path as a full path. `~` and relative paths start at the home folder, and an empty path is the home folder. */
@@ -859,6 +864,7 @@ async function transcribe(audio: string, mimeType: string): Promise<string> {
   }
   // Azure checks that the extension of the file name matches the type: `audio/webm;codecs=opus` is `audio.webm`.
   const type = mimeType.split(";")[0];
+  if (!AUDIO_TYPES.has(type)) throw new Error(`The recording type ${type} is not supported. Use webm, ogg, or mp4 audio.`);
   const form = new FormData();
   form.append("file", new Blob([Buffer.from(audio, "base64")], { type }), `audio.${type.split("/")[1]}`);
   // Voice input is English only.
@@ -1017,6 +1023,7 @@ const server = new WebSocketServer({
   host: HOST,
   port: PORT,
   path: "/ws",
+  maxPayload: MAX_MESSAGE_BYTES,
   verifyClient: ({ origin }: { origin: string }) => ALLOWED_ORIGINS.has(origin),
 });
 
@@ -1044,6 +1051,8 @@ server.on("connection", (socket) => {
   clients.add(socket);
   alive.add(socket);
   socket.on("pong", () => alive.add(socket));
+  // Without a listener, a protocol error or an oversized frame crashes the server. The close handler cleans up.
+  socket.on("error", () => socket.terminate());
   send(socket, { type: "remote", url: REMOTE_URL });
   send(socket, statusMessage());
   send(socket, tasksMessage());
@@ -1052,7 +1061,7 @@ server.on("connection", (socket) => {
   socket.on("message", (data) => {
     // The parse is inside the chain, so a malformed message gives an error and the server keeps running.
     Promise.resolve()
-      .then(() => handle(socket, JSON.parse(String(data)) as ClientMessage))
+      .then(() => handle(socket, parseClientMessage(String(data))))
       .catch((error: unknown) => send(socket, { type: "error", message: error instanceof Error ? error.message : String(error) }));
   });
 
