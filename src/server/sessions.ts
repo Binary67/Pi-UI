@@ -57,7 +57,7 @@ const WARM_MS = 10 * 60 * 1000;
 const ORCHESTRATOR_DIR = fileURLToPath(new URL("../orchestrator/", import.meta.url));
 // The orchestrator plans, reviews, and merges, and the subagents edit. So the orchestrator has no edit tools. It uses
 // bash for git and checks.
-export const ORCHESTRATOR_ARGS = [
+const ORCHESTRATOR_ARGS = [
   "-e",
   join(ORCHESTRATOR_DIR, "extension.ts"),
   "--append-system-prompt",
@@ -75,9 +75,10 @@ export const WORKTREES_DIR = join(homedir(), ".pi-ui", "worktrees");
 export const opening = new Map<string, Promise<Session>>();
 // Processes that stop now, by session file. A new open of the file waits until the old process has exited.
 const stopping = new Map<string, Promise<void>>();
-// A Pi process that waits for the next new session in `cwd`, so a new chat opens at once. The server keeps one spare,
-// for the project of the chat that a page opened last.
-let spare: { cwd: string; session: Promise<Session> } | undefined;
+// A Pi process that waits for the next new session in `cwd`, so a new chat or orchestrator opens at once. The server
+// keeps one spare of each kind, for the project of the chat that a page opened last. The kind sets the Pi options.
+const spares: Partial<Record<"chat" | "orchestrator", { cwd: string; session: Promise<Session> }>> = {};
+const SPARE_ARGS = { chat: [], orchestrator: ORCHESTRATOR_ARGS };
 // The task updates that wait for an orchestrator, by its session file. Each task has at most one, in arrival order.
 export const held = new Map<string, Map<Task, { path: string; update: Task; text: string }>>();
 // The orchestrators that got an update and have not settled since. `state.running` becomes true only at `agent_start`,
@@ -89,7 +90,7 @@ export const inFlight = new Set<string>();
  * session is not live yet. A new session works in the folder `dir`, such as the worktree of a task. A saved session
  * works in the folder in its file.
  */
-export async function launch(cwd: string, file?: string, args: string[] = [], dir = cwd): Promise<Session> {
+async function launch(cwd: string, file?: string, args: string[] = [], dir = cwd): Promise<Session> {
   // Two Pi processes must not write to the same file.
   if (file) await stopping.get(file);
   let session: Session | undefined;
@@ -199,34 +200,42 @@ export function register(session: Session): Session {
   return session;
 }
 
-/** Start a spare Pi process for `cwd`, unless one exists. A spare for another project stops. */
-export function prepareSpare(cwd: string): void {
-  if (spare?.cwd === cwd) return;
-  // A spare has no session file yet, so its stop needs no entry in `stopping`.
-  void spare?.session.then((session) => session.pi.stop(), () => {});
-  const session = launch(cwd);
-  // A spare that fails to start reports the error to the chat that takes it.
-  session.catch(() => {});
-  spare = { cwd, session };
+/** Start a spare Pi process of each kind for `cwd`, unless one exists. A spare for another project stops. */
+export function prepareSpares(cwd: string): void {
+  for (const kind of ["chat", "orchestrator"] as const) {
+    if (spares[kind]?.cwd === cwd) continue;
+    // A spare has no session file yet, so its stop needs no entry in `stopping`.
+    void spares[kind]?.session.then((session) => session.pi.stop(), () => {});
+    const session = launch(cwd, undefined, SPARE_ARGS[kind]);
+    // A spare that fails to start reports the error to the page that takes it.
+    session.catch(() => {});
+    spares[kind] = { cwd, session };
+  }
 }
 
-/** Stop the spare Pi process of the project `cwd`, if the server keeps one for it. */
+/** Stop the spare Pi processes of the project `cwd`, if the server keeps any for it. */
 export function dropSpare(cwd: string): void {
-  if (spare?.cwd === cwd) {
-    const old = spare;
-    spare = undefined;
+  for (const kind of ["chat", "orchestrator"] as const) {
+    const old = spares[kind];
+    if (old?.cwd !== cwd) continue;
+    delete spares[kind];
     void old.session.then((session) => session.pi.stop(), () => {});
   }
+}
+
+/** Take the spare of `kind` for `cwd`, or start a new Pi process of that kind. The session is not live yet. */
+export async function takeSpare(kind: "chat" | "orchestrator", cwd: string): Promise<Session> {
+  const ready = spares[kind]?.cwd === cwd ? spares[kind].session : undefined;
+  if (ready) delete spares[kind];
+  const session = await ready;
+  // A spare that has exited cannot run the session. Then a new process starts.
+  return session && !session.pi.exited ? session : await launch(cwd, undefined, SPARE_ARGS[kind]);
 }
 
 /** The live session in `file`, or a new Pi process for it. Without `file`, a new session in `cwd`. */
 export async function open(cwd: string, file?: string): Promise<Session> {
   if (!file) {
-    const ready = spare?.cwd === cwd ? spare.session : undefined;
-    if (ready) spare = undefined;
-    const session = await ready;
-    // A spare that has exited cannot run the session. Then a new process starts.
-    return register(session && !session.pi.exited ? session : await launch(cwd));
+    return register(await takeSpare("chat", cwd));
   }
   const live = sessions.get(file) ?? opening.get(file);
   if (live) return live;
