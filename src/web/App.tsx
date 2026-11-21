@@ -47,6 +47,7 @@ import type {
   UsageDay,
 } from "../shared/protocol.ts";
 import { Dashboard } from "./Dashboard.tsx";
+import { groupTurns } from "./groupTurns.ts";
 import { Banner, MessageView, Skeleton, type ToolResults, WorkGroup, Working } from "./Message.tsx";
 import { MicButton } from "./MicButton.tsx";
 import { Remote } from "./Remote.tsx";
@@ -99,11 +100,6 @@ function isAtBottom(): boolean {
 
 function scrollToBottom(behavior: ScrollBehavior): void {
   window.scrollTo({ top: document.documentElement.scrollHeight, behavior });
-}
-
-/** A user message or a task update for the orchestrator starts a turn. */
-function startsTurn(message: AgentMessage): boolean {
-  return message.role === "user" || (message.role === "custom" && message.customType === "task_update");
 }
 
 function titleClass(status: SessionStatus | undefined): string {
@@ -528,7 +524,8 @@ export function App() {
       ]
     : [];
   // One list, so a streamed message keeps its element when it completes.
-  const items = streaming ? [...messages, streaming] : messages;
+  const items = useMemo(() => (streaming ? [...messages, streaming] : messages), [messages, streaming]);
+  const turns = useMemo(() => groupTurns(items, running), [items, running]);
   // The messages array changes only on `message_end`, so the map stays the same while streaming.
   const sessionMessages = session?.state.messages;
   const results = useMemo(() => {
@@ -560,35 +557,15 @@ export function App() {
       onFork={canFork ? fork : undefined}
     />
   );
-  // Each user message starts a turn. A done turn shows its steps in one collapsed group, then the final answer.
   // The keys stay the item indexes, so the final answer keeps its element when the turn collapses.
   const thread: ReactNode[] = [];
-  for (let start = 0, end = 0; start < items.length; start = end) {
-    end = start + 1;
-    while (end < items.length && !startsTurn(items[end])) end++;
-    const turn = items.slice(start, end);
-    const first = startsTurn(turn[0]) ? 1 : 0;
-    const last = turn.findLastIndex((message) => message.role === "assistant");
-    const final = turn[last];
-    if (
-      !(running && end === items.length) &&
-      last > first &&
-      final.role === "assistant" &&
-      final.stopReason === "stop" &&
-      final.content.some((block) => block.type === "text" && block.text.trim())
-    ) {
-      const steps = turn.slice(first, last);
-      const tools = steps.flatMap((message) =>
-        message.role === "assistant" ? message.content.filter((block) => block.type === "toolCall") : [],
-      ).length;
+  for (const { start, messages: turn, work } of turns) {
+    if (work) {
+      const { first, last, tools, duration } = work;
       thread.push(
         ...turn.slice(0, first).map((message, index) => view(message, start + index)),
-        <WorkGroup
-          key={`work-${start}`}
-          duration={final.timestamp + (final.durationMs ?? 0) - turn[0].timestamp}
-          tools={tools}
-        >
-          {steps.map((message, index) => view(message, start + first + index))}
+        <WorkGroup key={`work-${start}`} duration={duration} tools={tools}>
+          {turn.slice(first, last).map((message, index) => view(message, start + first + index))}
         </WorkGroup>,
         ...turn.slice(last).map((message, index) => view(message, start + last + index)),
       );
