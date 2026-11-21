@@ -19,10 +19,8 @@ import {
 } from "lucide-react";
 import {
   type ChangeEvent,
-  type ClipboardEvent,
   type FormEvent,
   Fragment,
-  type KeyboardEvent,
   type ReactNode,
   useCallback,
   useEffect,
@@ -42,47 +40,29 @@ import type {
   SessionSnapshot,
   SessionSummary,
   SessionStatus,
-  StreamingBehavior,
   TaskSummary,
   UsageDay,
 } from "../shared/protocol.ts";
+import { Composer, TOUCH, scrollToBottom } from "./Composer.tsx";
+import { createDraft } from "./composerDraft.ts";
 import { Dashboard } from "./Dashboard.tsx";
 import { groupTurns } from "./groupTurns.ts";
 import { Banner, MessageView, Skeleton, type ToolResults, WorkGroup, Working } from "./Message.tsx";
-import { MicButton } from "./MicButton.tsx";
 import { Remote } from "./Remote.tsx";
-import { SendButton } from "./SendButton.tsx";
 import { SessionFooter } from "./SessionFooter.tsx";
 import { Settings } from "./Settings.tsx";
 import { TaskBoard } from "./TaskBoard.tsx";
 
 /** Distance in pixels from the page bottom that still counts as "at the bottom". */
 const BOTTOM_SLACK = 80;
-const COMPOSER_MAX_HEIGHT = 200;
 /** The session that this browser shows. A reconnect or a reload opens it again. */
 const VIEW_KEY = "pi-ui:session";
-/** The image types that Pi accepts in a prompt. */
-const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 /** The wait before the first reconnect. Each failed attempt doubles it, up to the maximum. */
 const RECONNECT_MIN_MS = 500;
 const RECONNECT_MAX_MS = 5000;
 /** The time between two pings. A socket that receives no message within PONG_TIMEOUT_MS of a ping is dead. */
 const PING_MS = 15000;
 const PONG_TIMEOUT_MS = 5000;
-/** True on a touch screen. Enter then adds a new line, and no field takes the focus by itself. */
-const TOUCH = matchMedia("(hover: none), (any-pointer: coarse)").matches;
-
-function readImage(file: File): Promise<PromptImage> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const url = reader.result as string;
-      resolve({ type: "image", data: url.slice(url.indexOf(",") + 1), mimeType: file.type });
-    };
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
-}
 
 function greeting(): string {
   const hour = new Date().getHours();
@@ -98,17 +78,13 @@ function isAtBottom(): boolean {
   return root.scrollHeight - root.scrollTop - root.clientHeight < BOTTOM_SLACK;
 }
 
-function scrollToBottom(behavior: ScrollBehavior): void {
-  window.scrollTo({ top: document.documentElement.scrollHeight, behavior });
-}
-
 function titleClass(status: SessionStatus | undefined): string {
   return status === "running" ? "session-title shimmer" : status ? "session-title" : "session-title cold";
 }
 
 export function App() {
   const socketRef = useRef<WebSocket | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [draft] = useState(createDraft);
   const [connected, setConnected] = useState(false);
   const [remoteUrl, setRemoteUrl] = useState<string | null>(null);
   const [cwd, setCwd] = useState("");
@@ -137,10 +113,6 @@ export function App() {
   // A saved session opens at once. The skeleton shows until it opens, so the welcome screen does not flash.
   const [loading, setLoading] = useState(() => localStorage.getItem(VIEW_KEY) !== null);
   const [errors, setErrors] = useState<string[]>([]);
-  const [text, setText] = useState("");
-  const [images, setImages] = useState<PromptImage[]>([]);
-  /** True while the page waits for the transcript of a voice recording. */
-  const [transcribing, setTranscribing] = useState(false);
   const [atBottom, setAtBottom] = useState(true);
   const running = session?.state.running ?? false;
   const showChat = session && !picking && page === null && !loading;
@@ -255,11 +227,11 @@ export function App() {
             setBranchState({ file: data.file, branch: data.branch });
             break;
           case "restore":
-            setText((current) => [data.text, current].filter((part) => part.trim()).join("\n\n"));
+            draft.setText((current) => [data.text, current].filter((part) => part.trim()).join("\n\n"));
             break;
           case "transcript":
-            setText((current) => [current, data.text].filter((part) => part.trim()).join(" "));
-            setTranscribing(false);
+            draft.setText((current) => [current, data.text].filter((part) => part.trim()).join(" "));
+            draft.setTranscribing(false);
             break;
           case "usage":
             setUsage(data.days);
@@ -267,7 +239,7 @@ export function App() {
           case "error":
             setErrors((current) => [...current, data.message]);
             setLoading(false);
-            setTranscribing(false);
+            draft.setTranscribing(false);
             break;
         }
       };
@@ -293,7 +265,7 @@ export function App() {
       setConnected(false);
       setLoading(false);
       // The transcript of a recording is lost with the socket.
-      setTranscribing(false);
+      draft.setTranscribing(false);
       timer = setTimeout(connect, delay);
       delay = Math.min(delay * 2, RECONNECT_MAX_MS);
     }
@@ -342,24 +314,6 @@ export function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [runningFile]);
-
-  // The keyboard of the composer shrinks the page. A reader at the bottom stays at the bottom, above the composer.
-  useEffect(() => {
-    if (!atBottom) return;
-    const onResize = () => {
-      if (document.activeElement === textareaRef.current) scrollToBottom("instant");
-    };
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, [atBottom]);
-
-  // Grow the composer with its text, up to a limit. Only a change of the text, or a new composer, changes its height.
-  useLayoutEffect(() => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-    textarea.style.height = "auto";
-    textarea.style.height = `${Math.min(textarea.scrollHeight, COMPOSER_MAX_HEIGHT)}px`;
-  }, [text, showChat]);
 
   // Follow new content only when the reader is already at the bottom. The scroll comes before the paint, so the new
   // content does not show first at the old position. It comes after the composer height, which changes the page height.
@@ -479,41 +433,17 @@ export function App() {
     start(cwd);
   }
 
-  function submit(streamingBehavior: StreamingBehavior) {
-    // Offline, the text stays in the composer.
-    if (!connected || !session || (!text.trim() && !images.length)) return;
-    send({ type: "prompt", file: session.file, text, images, streamingBehavior });
-    setText("");
-    setImages([]);
-  }
-
   // As with the TUI `/fork`, the text and images of the message replace the composer content.
   const sessionFile = session?.file;
   const fork = useCallback(
     (timestamp: number, forkText: string, forkImages: PromptImage[]) => {
       if (!sessionFile) return;
       send({ type: "fork", file: sessionFile, timestamp });
-      setText(forkText);
-      setImages(forkImages);
+      draft.setText(forkText);
+      draft.setImages(forkImages);
     },
     [sessionFile],
   );
-
-  // Pasted images become attachments. A paste without images inserts its text as usual.
-  function onPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
-    const files = [...event.clipboardData.files].filter((file) => IMAGE_TYPES.has(file.type));
-    if (!files.length) return;
-    event.preventDefault();
-    void Promise.all(files.map(readImage)).then((added) => setImages((current) => [...current, ...added]));
-  }
-
-  // On a touch screen, Enter adds a new line, and the send button sends.
-  function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === "Enter" && !event.shiftKey && !TOUCH) {
-      event.preventDefault();
-      submit(event.altKey ? "followUp" : "steer");
-    }
-  }
 
   const messages = session?.state.messages ?? [];
   const streaming = session?.state.streaming ?? null;
@@ -836,54 +766,16 @@ export function App() {
                     ))}
                   </ul>
                 )}
-                <div className="composer">
-                  {images.length > 0 && (
-                    <div className="attachments">
-                      {images.map((image, index) => (
-                        <div key={index} className="attachment">
-                          <img src={`data:${image.mimeType};base64,${image.data}`} alt="" />
-                          <button
-                            className="attachment-remove"
-                            onClick={() => setImages((current) => current.filter((_, i) => i !== index))}
-                            title="Remove image"
-                          >
-                            <X size={12} />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <textarea
-                    ref={textareaRef}
-                    value={text}
-                    onChange={(event) => setText(event.target.value)}
-                    onKeyDown={onKeyDown}
-                    onPaste={onPaste}
-                    placeholder="Message Pi…"
-                    rows={1}
-                    autoFocus={!TOUCH}
-                  />
-                  <MicButton
-                    disabled={!connected}
-                    transcribing={transcribing}
-                    onRecord={(audio, mimeType) => {
-                      // `send` drops a message without an open socket. The recording can end after the socket closed.
-                      if (!socketRef.current) {
-                        setErrors((current) => [...current, "Not connected. The recording is lost."]);
-                        return;
-                      }
-                      setTranscribing(true);
-                      send({ type: "transcribe", audio, mimeType });
-                    }}
-                    onError={(message) => setErrors((current) => [...current, message])}
-                  />
-                  <SendButton
-                    running={connected && running}
-                    ready={connected && Boolean(text.trim() || images.length)}
-                    onSend={() => submit("steer")}
-                    onStop={() => send({ type: "abort", file: session.file })}
-                  />
-                </div>
+                <Composer
+                  draft={draft}
+                  connected={connected}
+                  running={running}
+                  sessionFile={session.file}
+                  atBottom={atBottom}
+                  socketRef={socketRef}
+                  send={send}
+                  onError={(message) => setErrors((current) => [...current, message])}
+                />
                 <SessionFooter
                   info={session.info}
                   disabled={running}
