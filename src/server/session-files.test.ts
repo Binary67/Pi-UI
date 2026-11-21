@@ -11,9 +11,9 @@ async function fixture(t: TestContext): Promise<string> {
   return dir;
 }
 
-async function writeSession(dir: string, name: string, entries: unknown[]): Promise<string> {
+async function writeSession(dir: string, name: string, entries: unknown[], timestamp = "2026-11-13T00:00:00.000Z"): Promise<string> {
   const file = join(dir, `${name}.jsonl`);
-  const header = { type: "session", version: 3, id: name, timestamp: "2026-11-13T00:00:00.000Z", cwd: dir };
+  const header = { type: "session", version: 3, id: name, timestamp, cwd: dir };
   await writeFile(file, [header, ...entries].map((entry) => JSON.stringify(entry)).join("\n") + "\n");
   return file;
 }
@@ -28,7 +28,7 @@ test("session listing uses message activity, titles, and strict LF framing", asy
     message("u1", null, { role: "user", content: "Original\u2028prompt\u2029text", timestamp: 1000 }),
     message("a1", "u1", { role: "assistant", content: [{ type: "text", text: "Reply" }], timestamp: 5000 }),
     { type: "session_info", id: "name", parentId: "a1", timestamp: "2026-11-13T01:00:00.000Z", name: " Named chat " },
-  ]);
+  ], "1970-01-01T00:00:00.000Z");
   const older = await writeSession(dir, "older", [
     message("u2", null, {
       role: "user",
@@ -40,7 +40,7 @@ test("session listing uses message activity, titles, and strict LF framing", asy
       timestamp: 2000,
     }),
     { type: "custom", id: "metadata", parentId: "u2", timestamp: "2026-11-13T23:00:00.000Z", data: "not activity" },
-  ]);
+  ], "1970-01-01T00:00:00.000Z");
   await writeFile(newer, (await readFile(newer, "utf8")) + '{"type":"session_info","name":"Incomplete');
   const invalid = join(dir, "invalid.jsonl");
   await writeFile(invalid, "{}\n");
@@ -101,7 +101,7 @@ test("forks preserve ancestry, images, opaque metadata, compaction references, a
     { type: "label", id: "dropped", parentId: "cleared", targetId: "target", label: "Not retained", timestamp: "2026-11-13T09:00:00.000Z" },
   ]);
   const original = await readFile(source, "utf8");
-  const forked = await forkSession(source, 3000);
+  const forked = await forkSession(source, 3000, []);
   assert.ok(forked);
   const [header, ...entries] = (await readFile(forked, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
   assert.equal(header.version, 3);
@@ -135,8 +135,8 @@ test("forking the first prompt creates no file, and a missing prompt is reported
     message("u1", "model", { role: "user", content: "First prompt", timestamp: 1000 }),
   ]);
   const original = await readFile(source, "utf8");
-  assert.equal(await forkSession(source, 1000), undefined);
-  await assert.rejects(forkSession(source, 9999), /message is not in the session file/);
+  assert.equal(await forkSession(source, 1000, []), undefined);
+  await assert.rejects(forkSession(source, 9999, []), /message is not in the session file/);
   assert.deepEqual(await readdir(dir), ["source.jsonl"]);
   assert.equal(await readFile(source, "utf8"), original);
 });
@@ -148,11 +148,61 @@ test("forks retain a compaction's self-reference and fall back to the prior prom
     { type: "compaction", id: "compact", parentId: "u1", firstKeptEntryId: "compact", summary: "Retain none", timestamp: "2026-11-13T01:00:00.000Z" },
     message("u2", "compact", { role: "user", content: "Selected", timestamp: 2000 }),
   ]);
-  const forked = await forkSession(source, 2000);
+  const forked = await forkSession(source, 2000, []);
   assert.ok(forked);
   const records = (await readFile(forked, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
   assert.equal(records[2].firstKeptEntryId, "compact");
   assert.equal(records.at(-1).name, "Fork: First prompt");
+});
+
+async function namedChat(dir: string, file: string, name: string): Promise<string> {
+  return writeSession(dir, file, [
+    message("u1", null, { role: "user", content: "One", timestamp: 1000 }),
+    message("a1", "u1", { role: "assistant", content: [], timestamp: 2000 }),
+    message("u2", "a1", { role: "user", content: "Two", timestamp: 3000 }),
+    { type: "session_info", id: "name", parentId: "u2", timestamp: "2026-11-13T01:00:00.000Z", name },
+  ]);
+}
+
+async function forkName(source: string, taken: string[]): Promise<string> {
+  const forked = await forkSession(source, 3000, taken);
+  assert.ok(forked);
+  return JSON.parse((await readFile(forked, "utf8")).trim().split("\n").at(-1)!).name;
+}
+
+test("a fork of a fork is named without a stacked prefix", async (t) => {
+  const dir = await fixture(t);
+  const source = await namedChat(dir, "source", "X");
+  const forked = await forkSession(source, 3000, []);
+  assert.ok(forked);
+  const [, ...entries] = (await readFile(forked, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+  assert.equal(entries.at(-1).name, "Fork: X");
+  assert.equal(await forkName(await namedChat(dir, "second", "Fork: X"), []), "Fork: X");
+});
+
+test("a fork name that is taken gets the smallest free number", async (t) => {
+  const dir = await fixture(t);
+  const source = await namedChat(dir, "source", "X");
+  assert.equal(await forkName(source, ["Fork: X"]), "Fork: X (2)");
+  assert.equal(await forkName(source, ["Fork: X", "Fork: X (2)"]), "Fork: X (3)");
+  assert.equal(await forkName(source, ["Fork: X", "Fork: X (3)"]), "Fork: X (2)");
+});
+
+test("a fork of a numbered fork drops its number, and a title without the prefix keeps its number", async (t) => {
+  const dir = await fixture(t);
+  const numbered = await namedChat(dir, "numbered", "Fork: X (2)");
+  assert.equal(await forkName(numbered, ["Fork: X", "Fork: X (2)"]), "Fork: X (3)");
+  const plan = await namedChat(dir, "plan", "Plan (2)");
+  assert.equal(await forkName(plan, []), "Fork: Plan (2)");
+});
+
+test("a new fork is listed before its source", async (t) => {
+  const dir = await fixture(t);
+  const source = await namedChat(dir, "source", "X");
+  const forked = await forkSession(source, 3000, []);
+  assert.ok(forked);
+  const sessions = await listSessions([source, forked]);
+  assert.deepEqual(sessions.map((session) => session.path), [forked, source]);
 });
 
 test("a moved session gets the new working folder and keeps its entries, and a missing file stays absent", async (t) => {

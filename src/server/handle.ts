@@ -14,6 +14,7 @@ import {
   getOrchestrators,
   isKept,
   keepSession,
+  listProjects,
   markRead,
   removeOrchestrator,
   removeProject,
@@ -239,8 +240,12 @@ export async function handle(socket: WebSocket, message: ClientMessage): Promise
       if (findOrchestrator(session.file) || findTask(session.file)) {
         throw new Error("An orchestrator or a task session cannot be forked.");
       }
-      const file = await forkSession(session.file, message.timestamp);
-      if (file) keepSession(session.cwd, file);
+      const taken = (await listProjects()).find((project) => project.path === session.cwd)?.sessions.map((item) => item.title) ?? [];
+      const file = await forkSession(session.file, message.timestamp, taken);
+      if (file) {
+        keepSession(session.cwd, file);
+        await broadcastProjects();
+      }
       // The fork opens in its own Pi process, after the other starts of the page. The original session does not change.
       return handle(socket, { type: "start", cwd: session.cwd, file });
     }

@@ -68,7 +68,7 @@ export async function listSessions(files: string[]): Promise<SessionListing[]> {
         const listing = {
           path,
           title: sessionName(entries) ?? (firstMessage || "(no messages)"),
-          modified: modified || Date.parse(header.timestamp),
+          modified: Math.max(modified, Date.parse(header.timestamp)),
         };
         listings.set(path, { mtimeMs, size, listing });
         return listing;
@@ -99,8 +99,11 @@ export async function moveSession(file: string, cwd: string): Promise<void> {
   await rename(temp, file);
 }
 
-/** Create a separate fork before a user message. Never write to the source, which may still be running. */
-export async function forkSession(file: string, timestamp: number): Promise<string | undefined> {
+/**
+ * Create a separate fork before a user message. Never write to the source, which may still be running.
+ * `taken` has the titles of the sessions that the sidebar lists in the project. A fork name that is taken gets a number.
+ */
+export async function forkSession(file: string, timestamp: number, taken: string[]): Promise<string | undefined> {
   const { header, entries } = await readSession(file);
   const target = entries.find(
     (entry) => entry.type === "message" && entry.message?.role === "user" && entry.message.timestamp === timestamp,
@@ -118,6 +121,12 @@ export async function forkSession(file: string, timestamp: number): Promise<stri
   const prompts = branch.filter((entry) => entry.type === "message" && entry.message?.role === "user");
   if (!prompts.length) return undefined;
   const title = sessionName(entries) ?? prompts.map((entry) => messageText(entry.message!)).find(Boolean);
+  // A fork of a fork keeps the title of the first one: remove the stacked prefixes and the number of an earlier copy.
+  const base = title?.startsWith("Fork: ") ? title.replace(/^(Fork: )+/, "").replace(/ \(\d+\)$/, "") : title;
+  const clean = (text: string) => text.replace(/[\r\n]+/g, " ").trim();
+  const prefix = clean(base ? `Fork: ${base}` : "Fork");
+  let name = prefix;
+  for (let number = 2; taken.includes(name); number++) name = clean(`${prefix} (${number})`);
 
   // Labels are metadata on any branch. Resolve their latest values, then recreate those for retained entries.
   const labels = new Map<string, SessionEntry>();
@@ -161,7 +170,7 @@ export async function forkSession(file: string, timestamp: number): Promise<stri
     id: randomUUID(),
     parentId,
     timestamp: created,
-    name: (title ? `Fork: ${title}` : "Fork").replace(/[\r\n]+/g, " ").trim(),
+    name,
   });
   await writeFile(forked, [forkHeader, ...kept].map((entry) => JSON.stringify(entry)).join("\n") + "\n", { flag: "wx" });
   return forked;
