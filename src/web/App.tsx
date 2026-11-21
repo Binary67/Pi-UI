@@ -50,7 +50,8 @@ export function App() {
   const running = session?.state.running ?? false;
   const showChat = session && !picking && page === null && !loading;
 
-  const { send, socketRef, connected, remoteUrl, listing, projects, statuses, tasks, branchState } = useServerConnection({ draft, setSession, setLoading, setErrors, setPicking, setCwd, setUsage });
+  const { send, socketRef, connected, remoteUrl, listing, projects, statuses, tasks, branchState } =
+    useServerConnection({ draft, setSession, setLoading, setErrors, setPicking, setCwd, setUsage });
 
   useEffect(() => {
     const onScroll = () => setAtBottom(isAtBottom());
