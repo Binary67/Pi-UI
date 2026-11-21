@@ -45,9 +45,12 @@ function MicrophoneMenu() {
   }
 
   useEffect(() => {
-    void refresh();
-    navigator.mediaDevices.addEventListener("devicechange", refresh);
-    return () => navigator.mediaDevices.removeEventListener("devicechange", refresh);
+    // The browser has no `mediaDevices` on a page that is not secure.
+    if (!navigator.mediaDevices) return;
+    const update = () => void refresh().catch(() => {});
+    update();
+    navigator.mediaDevices.addEventListener("devicechange", update);
+    return () => navigator.mediaDevices.removeEventListener("devicechange", update);
   }, []);
 
   return (
@@ -59,7 +62,7 @@ function MicrophoneMenu() {
       items={[{ key: "", label: "System default" }, ...microphones.map(({ label }) => ({ key: label, label }))]}
       selected={saved?.label ?? ""}
       disabled={false}
-      onOpen={() => void open()}
+      onOpen={() => void open().catch(() => {})}
       onSelect={(key) => {
         const microphone = microphones.find((item) => item.label === key);
         if (microphone) localStorage.setItem(MICROPHONE_KEY, JSON.stringify(microphone));

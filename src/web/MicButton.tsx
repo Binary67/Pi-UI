@@ -15,7 +15,12 @@ const NOT_CONNECTED = "The selected microphone is not connected. Choose another 
 /** The microphone that the user chose, or undefined for the system default. */
 export function savedMicrophone(): Microphone | undefined {
   const value = localStorage.getItem(MICROPHONE_KEY);
-  return value ? (JSON.parse(value) as Microphone) : undefined;
+  if (!value) return undefined;
+  try {
+    return JSON.parse(value) as Microphone;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -24,6 +29,8 @@ export function savedMicrophone(): Microphone | undefined {
  * microphone then gives silence while the output is on a different Bluetooth device.
  */
 async function openMicrophone(): Promise<MediaStream> {
+  // The browser has no `mediaDevices` on a page that is not secure.
+  if (!navigator.mediaDevices) throw new Error("Voice input needs HTTPS or localhost.");
   const saved = savedMicrophone();
   if (!saved) return navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false } });
   const stream = await navigator.mediaDevices.getUserMedia({
@@ -90,37 +97,45 @@ export function MicButton({ disabled, transcribing, onRecord, onError }: MicButt
       void audio.close();
       return onError(error instanceof Error ? error.message : String(error));
     }
-    const analyser = audio.createAnalyser();
-    audio.createMediaStreamSource(stream).connect(analyser);
-    const recorder = new MediaRecorder(stream);
-    const chunks: Blob[] = [];
-    recorder.ondataavailable = (event) => chunks.push(event.data);
-    recorder.onstart = () => {
-      setOpening(false);
-      setRecording({ analyser, label: stream.getAudioTracks()[0].label });
-    };
-    recorder.onstop = () => {
-      recorderRef.current = undefined;
-      setRecording(undefined);
-      // The microphone turns off.
+    try {
+      const analyser = audio.createAnalyser();
+      audio.createMediaStreamSource(stream).connect(analyser);
+      const recorder = new MediaRecorder(stream);
+      const chunks: Blob[] = [];
+      recorder.ondataavailable = (event) => chunks.push(event.data);
+      recorder.onstart = () => {
+        setOpening(false);
+        setRecording({ analyser, label: stream.getAudioTracks()[0].label });
+      };
+      recorder.onstop = () => {
+        recorderRef.current = undefined;
+        setRecording(undefined);
+        // The microphone turns off.
+        for (const track of stream.getTracks()) track.stop();
+        void audio.close();
+        const blob = new Blob(chunks, { type: recorder.mimeType });
+        if (!mountedRef.current) return;
+        // The browser gives silence when it has no access to the microphone.
+        if (!soundRef.current) return onError(SILENCE);
+        if (!blob.size) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          const url = reader.result as string;
+          onRecord(url.slice(url.indexOf(",") + 1), recorder.mimeType);
+        };
+        reader.readAsDataURL(blob);
+      };
+      recorderRef.current = recorder;
+      recorder.start();
+      // The component unmounted while the browser opened the microphone.
+      if (!mountedRef.current) recorder.stop();
+    } catch (error) {
+      // The setup failed after the stream opened, so turn the microphone off.
       for (const track of stream.getTracks()) track.stop();
       void audio.close();
-      const blob = new Blob(chunks, { type: recorder.mimeType });
-      if (!mountedRef.current) return;
-      // The browser gives silence when it has no access to the microphone.
-      if (!soundRef.current) return onError(SILENCE);
-      if (!blob.size) return;
-      const reader = new FileReader();
-      reader.onload = () => {
-        const url = reader.result as string;
-        onRecord(url.slice(url.indexOf(",") + 1), recorder.mimeType);
-      };
-      reader.readAsDataURL(blob);
-    };
-    recorderRef.current = recorder;
-    recorder.start();
-    // The component unmounted while the browser opened the microphone.
-    if (!mountedRef.current) recorder.stop();
+      setOpening(false);
+      onError(error instanceof Error ? error.message : String(error));
+    }
   }
 
   return (
