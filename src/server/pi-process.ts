@@ -56,7 +56,16 @@ export class PiProcess {
         const line = this.parts.join("").replace(/\r$/, "");
         this.parts = [];
         start = end + 1;
-        if (line) this.handleRecord(JSON.parse(line) as PiRecord, onEvent);
+        if (!line) continue;
+        let record: PiRecord;
+        try {
+          record = JSON.parse(line) as PiRecord;
+        } catch {
+          // A stray line on stdout must not stop the stream. The next lines still arrive.
+          console.error("Pi wrote a line that is not JSON:", line);
+          continue;
+        }
+        this.handleRecord(record, onEvent);
       }
       if (start < chunk.length) this.parts.push(start ? chunk.slice(start) : chunk);
     });
@@ -114,7 +123,7 @@ export class PiProcess {
       this.pending.delete(id);
     } else if (record.type === "extension_ui_request") {
       if (this.onRequest && record.method === "editor" && record.title?.startsWith(REQUEST_PREFIX)) {
-        void this.answer(this.onRequest, record.id, record.title.slice(REQUEST_PREFIX.length), record.prefill!);
+        void this.answer(this.onRequest, record.id, record.title.slice(REQUEST_PREFIX.length), record.prefill);
       } else if (DIALOG_METHODS.has(record.method)) {
         // The UI has no dialogs yet. Cancel them, so the run does not wait forever.
         this.write({ type: "extension_ui_response", id: record.id, cancelled: true });
@@ -125,8 +134,9 @@ export class PiProcess {
   }
 
   /** Answer a request of the orchestrator extension with JSON: `{ result }`, or `{ error }`. */
-  private async answer(onRequest: RequestHandler, id: string, name: string, prefill: string): Promise<void> {
-    const value = await onRequest(name, JSON.parse(prefill)).then(
+  private async answer(onRequest: RequestHandler, id: string, name: string, prefill = ""): Promise<void> {
+    // A bad `prefill` or a synchronous throw also gives an `{ error }` answer, so Pi does not wait for ever.
+    const value = await Promise.resolve().then(() => onRequest(name, JSON.parse(prefill))).then(
       (result) => ({ result }),
       (error: unknown) => ({ error: error instanceof Error ? error.message : String(error) }),
     );
