@@ -83,7 +83,8 @@ way.
    it also has the branch and the changed files, with the changed files outside the owned files. The server holds the
    updates while the orchestrator runs, and sends them one at a time when it is idle. It drops an update when its task
    has left review in the meantime, for example after `cancel_task`. The orchestrator waits for the tasks that still
-   run when it needs their results. It does not poll.
+   run when it needs their results. It does not poll. After a server restart, the orchestrator gets the task updates
+   that it did not get before. `finish_task` refuses a worktree that is not on its task branch.
 
 - At startup, the server deletes each worktree folder and each `pi-ui/*` branch that no running task or task in review
   owns. This removes what a crash or a failed cleanup left behind.

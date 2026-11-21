@@ -158,7 +158,12 @@ async function removeUnused(folder: string, active: string[]): Promise<void> {
     const entry = join(folder, name);
     if (active.includes(entry)) continue;
     if (active.some((worktree) => worktree.startsWith(entry + sep))) await removeUnused(entry, active);
-    else await rm(entry, { recursive: true, force: true });
+    else {
+      // A process can hold the folder. The next start tries again.
+      await rm(entry, { recursive: true, force: true }).catch((error: unknown) =>
+        console.error(`Could not delete ${entry}:`, error),
+      );
+    }
   }
 }
 

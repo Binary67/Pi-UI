@@ -488,7 +488,9 @@ async function dropOrchestrator(file: string): Promise<void> {
   for (const result of results) {
     if (result.status === "rejected") console.error("Could not clean up the orchestrator:", result.reason);
   }
-  await rm(join(WORKTREES_DIR, orchestrator.id), { recursive: true, force: true });
+  await rm(join(WORKTREES_DIR, orchestrator.id), { recursive: true, force: true }).catch((error: unknown) =>
+    console.error("Could not delete the worktree folder of the orchestrator:", error),
+  );
 }
 
 /** Stop the Pi process of the session in `file`. A run stops first. Resolves when the process has exited. */
@@ -533,6 +535,7 @@ function toReview(path: string, task: Task, note: string | undefined, state?: Ch
   // The update describes the task as it is now, also when the task changes during the commit.
   const update = { ...task };
   task.direct = false;
+  task.pending = true;
   saveTasks();
   report(path, task, update, state).catch((error: unknown) =>
     console.error(`Could not send the update of task ${task.id}:`, error),
@@ -542,11 +545,30 @@ function toReview(path: string, task: Task, note: string | undefined, state?: Ch
 /** Commit the changes of `task`, so that its branch is complete for the review and the merge. Then send `update`. */
 async function report(path: string, task: Task, update: Task, state?: ChatState): Promise<void> {
   if (task.worktree) {
-    await commitAll(task.worktree.dir, task.title).catch((error: unknown) => {
-      update.note = [update.note, `The server could not commit the changes: ${errorText(error)}`].filter(Boolean).join(" ");
-    });
+    const { worktree } = task;
+    await checkBranch(worktree)
+      .then(() => commitAll(worktree.dir, task.title))
+      .catch((error: unknown) => {
+        update.note = [update.note, `The server could not commit the changes: ${errorText(error)}`].filter(Boolean).join(" ");
+      });
   }
-  await notify(path, task, update, updateText(update, await taskChanges(task), state));
+  // A git failure must not lose the update.
+  const changes = await taskChanges(task).catch((error: unknown) => {
+    update.note = [update.note, `The server could not read the changes: ${errorText(error)}`].filter(Boolean).join(" ");
+    return undefined;
+  });
+  await notify(path, task, update, updateText(update, changes, state));
+}
+
+/** Throws unless the worktree `dir` is on its task branch `branch`. A commit on another branch would not reach the task branch. */
+async function checkBranch({ dir, branch }: { dir: string; branch: string }): Promise<void> {
+  const current = (await readBranch(dir))?.current;
+  if (current === branch) return;
+  throw new Error(
+    current
+      ? `The worktree is on ${current}, not on ${branch}. Tell the subagent to switch back to ${branch} and to bring its work there.`
+      : `The worktree is not in a git repository. Tell the subagent to restore it on ${branch} and to bring its work there.`,
+  );
 }
 
 /** The git changes of `task` in its worktree. Undefined when the task has no worktree. */
@@ -575,10 +597,13 @@ async function notify(path: string, task: Task, update: Task, text: string): Pro
 async function deliver(file: string): Promise<void> {
   const queue = held.get(file);
   if (!queue || inFlight.has(file) || sessions.get(file)?.state.running) return;
-  for (const [task, { path, update, text }] of queue) {
-    queue.delete(task);
+  for (const [task, entry] of queue) {
+    const { path, update, text } = entry;
     // An update that is out of date must not open the session of the orchestrator.
-    if (task.status !== "review") continue;
+    if (task.status !== "review") {
+      queue.delete(task);
+      continue;
+    }
     // No await comes before this line, so a second call cannot send at the same time.
     inFlight.add(file);
     try {
@@ -595,8 +620,15 @@ async function deliver(file: string): Promise<void> {
             message: `/pi-ui-task ${JSON.stringify({ text: full, details })}`,
             streamingBehavior: "followUp",
           });
+          // The entry stays in the queue until the send worked. A newer update of the task can replace it meanwhile.
+          if (queue.get(task) === entry) {
+            queue.delete(task);
+            task.pending = false;
+            saveTasks();
+          }
           return;
         }
+        if (queue.get(task) === entry) queue.delete(task);
       } finally {
         // The session is idle again, so its warm timer starts again.
         release(session.file);
@@ -777,6 +809,7 @@ async function taskTool(path: string, orchestrator: Orchestrator, name: string, 
       if (task.status !== "review") throw new Error(`Task ${task.id} is ${task.status}. Only a task in review can finish.`);
       if (task.worktree) {
         const { dir, branch } = task.worktree;
+        await checkBranch(task.worktree);
         // Changes after the last commit, such as from a server restart, need a review and a merge too.
         if (await commitAll(dir, task.title)) {
           throw new Error(`Task ${task.id} had uncommitted changes. They are now on ${branch}. Review and merge them first.`);
@@ -968,6 +1001,17 @@ await removeLeftovers(
     tasks.flatMap((task) => (isActive(task) && task.worktree ? [{ worktree: task.worktree.dir, branch: task.worktree.branch }] : [])),
   ),
 );
+
+// The updates that the last server run did not deliver. `report` commits the changes of a worktree task first.
+for (const path of projectPaths()) {
+  for (const { tasks } of getOrchestrators(path)) {
+    for (const task of tasks.filter((item) => item.status === "review" && item.pending)) {
+      report(path, task, { ...task }).catch((error: unknown) =>
+        console.error(`Could not send the update of task ${task.id}:`, error),
+      );
+    }
+  }
+}
 
 const server = new WebSocketServer({
   host: HOST,
