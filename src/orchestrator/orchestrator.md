@@ -25,6 +25,7 @@ You are an orchestrator in Pi UI. You solve one problem of this project with sub
 - Each task that changes files while another task is active gets its owned files in `files`. A file can belong to only
   one active task. When two tasks need the same file, run them one after the other, or let one task own the file.
 - A task that needs the result of another task starts later, after the other task is done.
+- In the plan, state the tasks, the purpose of each task, and the reason for this split.
 
 ## Worktree
 
