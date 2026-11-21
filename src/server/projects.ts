@@ -28,6 +28,8 @@ export type Task = Omit<TaskSummary, "activity"> & {
   started?: number;
   /** True when the user sent a message to the subagent after the last task update. */
   direct?: boolean;
+  /** True while the task update of the last run is not delivered to the orchestrator. */
+  pending?: boolean;
 };
 
 /** An orchestrator session, and its tasks in start order. `id` names its worktrees and branches. */
@@ -46,7 +48,7 @@ function load(): StoredProject[] {
     const loaded: StoredProject[] = JSON.parse(readFileSync(FILE, "utf8")).projects;
     // The Pi processes of the last server run have stopped. A task that was running then waits for review.
     for (const task of loaded.flatMap((project) => project.orchestrators.flatMap((item) => item.tasks))) {
-      if (task.status === "running") Object.assign(task, { status: "review", note: "Interrupted by a server restart." });
+      if (task.status === "running") Object.assign(task, { status: "review", note: "Interrupted by a server restart.", pending: true });
     }
     return loaded;
   } catch (error) {
