@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyEvent, type ChatState, emptyChatState } from "../shared/chat-state.ts";
 import type { AgentMessage, JsonAgentSessionEvent, SessionEntry } from "../shared/pi-rpc.ts";
-import type { StreamingBehavior } from "../shared/protocol.ts";
+import type { ModelRef, SessionKind, StreamingBehavior } from "../shared/protocol.ts";
 import {
   broadcast,
   broadcastProjects,
@@ -27,6 +27,7 @@ import {
   type Task,
 } from "./projects.ts";
 import { moveSession } from "./session-files.ts";
+import { getChoice } from "./settings.ts";
 import { type Session, sessions, views } from "./state.ts";
 import {
   type Changes,
@@ -66,8 +67,6 @@ const ORCHESTRATOR_ARGS = [
   "read,grep,find,ls,bash,start_tasks,list_tasks,get_task,message_task,finish_task,cancel_task",
 ];
 const SUBAGENT_ARGS = ["--append-system-prompt", join(ORCHESTRATOR_DIR, "subagent.md")];
-// The model of new subagent sessions from `.env`, as a Pi `--model` pattern. Empty or absent, Pi uses its default.
-const SUBAGENT_MODEL = process.env.PI_UI_SUBAGENT_MODEL || null;
 // The worktrees of the tasks, in a folder for each orchestrator: `<orchestrator id>/task-<task id>`.
 export const WORKTREES_DIR = join(homedir(), ".pi-ui", "worktrees");
 
@@ -223,13 +222,44 @@ export function dropSpare(cwd: string): void {
   }
 }
 
+/**
+ * Give `session` the model and thinking level that Pi-UI remembers for `kind`. A spare can start before the user changes
+ * the choice. A saved model that has no credentials any more is skipped.
+ */
+async function applyChoice(session: Session, kind: SessionKind): Promise<void> {
+  const { model, thinkingLevel } = getChoice(kind);
+  const { pi } = session;
+  const key = (item: ModelRef) => `${item.provider}/${item.id}`;
+  let changed = false;
+  const current = session.info.model && key(session.info.model);
+  if (model && key(model) !== current && session.info.models.some((item) => key(item) === key(model))) {
+    await pi.send({ type: "set_model", provider: model.provider, modelId: model.id });
+    // A model change can change the thinking level.
+    session.info = await readInfo(pi);
+    changed = true;
+  }
+  if (thinkingLevel && thinkingLevel !== session.info.thinkingLevel) {
+    await pi.send({ type: "set_thinking_level", level: thinkingLevel });
+    changed = true;
+  }
+  if (changed) session.info = await readInfo(pi);
+}
+
 /** Take the spare of `kind` for `cwd`, or start a new Pi process of that kind. The session is not live yet. */
 export async function takeSpare(kind: "chat" | "orchestrator", cwd: string): Promise<Session> {
   const ready = spares[kind]?.cwd === cwd ? spares[kind].session : undefined;
   if (ready) delete spares[kind];
-  const session = await ready;
+  const spare = await ready;
   // A spare that has exited cannot run the session. Then a new process starts.
-  return session && !session.pi.exited ? session : await launch(cwd, undefined, SPARE_ARGS[kind]);
+  const session = spare && !spare.pi.exited ? spare : await launch(cwd, undefined, SPARE_ARGS[kind]);
+  try {
+    await applyChoice(session, kind);
+  } catch (error) {
+    // The session has no file yet, so its stop needs no entry in `stopping`.
+    void session.pi.stop();
+    throw error;
+  }
+  return session;
 }
 
 /** The live session in `file`, or a new Pi process for it. Without `file`, a new session in `cwd`. */
@@ -450,14 +480,15 @@ async function launchTask(path: string, task: Task, signal: AbortSignal): Promis
     if (task.worktree && task.setup) await runSetup(task.worktree.dir, task.setup, signal);
     // The task can be cancelled during its setup.
     if (task.status !== "running") return;
-    // A session records its model, so only a new subagent session gets `--model`.
-    const model = SUBAGENT_MODEL ? ["--model", SUBAGENT_MODEL] : [];
     const session = register(
-      await launch(path, undefined, [...SUBAGENT_ARGS, ...model, "--name", task.title], task.worktree?.dir),
+      await launch(path, undefined, [...SUBAGENT_ARGS, "--name", task.title], task.worktree?.dir),
     );
     task.file = session.file;
     saveTasks();
     // The task can be cancelled while Pi starts. Then `closeTask` stops the session.
+    if (task.status !== "running") return;
+    // A session records its model, so only a new subagent session gets the choice.
+    await applyChoice(session, "subagent");
     if (task.status !== "running") return;
     await session.pi.send({ type: "prompt", message: taskPrompt(task) });
   } catch (error) {

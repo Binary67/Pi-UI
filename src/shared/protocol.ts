@@ -17,6 +17,12 @@ export type ThinkingLevel = RpcSessionState["thinkingLevel"];
 /** The parts of a Pi model that the page shows. The full model can contain provider headers. */
 export type ModelRef = Pick<NonNullable<RpcSessionState["model"]>, "provider" | "id">;
 
+/** The kinds of session. Pi-UI remembers the last model and thinking level of each kind for its new sessions. */
+export type SessionKind = "chat" | "orchestrator" | "subagent";
+
+/** A remembered model and thinking level. An absent field leaves the Pi default. */
+export type ModelChoice = { model?: ModelRef; thinkingLevel?: ThinkingLevel };
+
 /** The model, thinking level, and usage of a session: the data of the TUI footer. */
 export type SessionInfo = {
   /** Absent when no model is selected. */
@@ -54,6 +60,10 @@ export type ClientMessage =
   | { type: "abort"; file: string }
   | { type: "set_model"; file: string; provider: string; modelId: string }
   | { type: "set_thinking_level"; file: string; level: ThinkingLevel }
+  /** Ask for the subagent choice. The answer is a `subagent` message. */
+  | { type: "get_subagent" }
+  | { type: "set_subagent_model"; provider: string; modelId: string }
+  | { type: "set_subagent_thinking_level"; level: ThinkingLevel }
   /** Copy the session in `file` up to its user message with `timestamp` into a new session, then show it. */
   | { type: "fork"; file: string; timestamp: number }
   /** Read the branch of the session in `file` again. The answer is a `branch` message. */
@@ -135,6 +145,8 @@ export type ServerMessage =
   | { type: "event"; file: string; event: JsonAgentSessionEvent }
   /** New model, thinking level, or usage data for the session in `file`. */
   | { type: "info"; file: string; info: SessionInfo }
+  /** The subagent choice, and the last model list that the server read. The list is empty before the first session. */
+  | { type: "subagent"; choice: ModelChoice; models: ModelRef[] }
   /** The branch of the session in `file`. Null when its folder is not in a git repository. */
   | { type: "branch"; file: string; branch: BranchInfo | null }
   /** The text of the queued messages that an abort removed, for the composer. */

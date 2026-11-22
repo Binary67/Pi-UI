@@ -635,8 +635,20 @@ textarea::placeholder {
   letter-spacing: -0.02em;
 }
 
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-note {
+  margin: 0 0 0 4px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
 .settings-section h2 {
-  margin: 0 0 8px 4px;
+  margin: 0 0 0 4px;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.06em;

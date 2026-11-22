@@ -1,7 +1,11 @@
-import { ArrowLeft, Mic } from "lucide-react";
+import { ArrowLeft, Brain, Cpu, Mic } from "lucide-react";
 import { useEffect, useState } from "react";
+import type { ClientMessage, ModelChoice, ModelRef, ThinkingLevel } from "../shared/protocol.ts";
 import { Menu } from "./Menu.tsx";
 import { MICROPHONE_KEY, type Microphone, savedMicrophone } from "./MicButton.tsx";
+import { levelName, modelKey } from "./SessionFooter.tsx";
+
+const LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
 
 /**
  * The microphone of voice input. The choice belongs to this browser, so a run does not block it. The browser gives the
@@ -73,8 +77,67 @@ function MicrophoneMenu() {
   );
 }
 
-/** The settings page. The browser keeps the settings, so a run does not block them. */
-export function Settings({ onBack }: { onBack?: () => void }) {
+/**
+ * The model and thinking level of new subagents. The server keeps them. Pi-UI knows the models only after the server
+ * has started a Pi process, so the model list can be empty. Then the menu lists only the saved choice.
+ */
+function SubagentMenus({ choice, models, send }: { choice: ModelChoice; models: ModelRef[]; send: (message: ClientMessage) => void }) {
+  const { model, thinkingLevel } = choice;
+  const listed = models.length ? models : model ? [model] : [];
+  // The menu needs the models of each provider next to each other.
+  const providers = [...new Set(listed.map((item) => item.provider))];
+  const items = providers.flatMap((provider) =>
+    listed.filter((item) => item.provider === provider).map((item) => ({ key: modelKey(item), label: item.id, group: provider })),
+  );
+  return (
+    <>
+      <div className="settings-row">
+        <span>Model</span>
+        <Menu
+          icon={<Cpu size={14} />}
+          label={model?.id ?? "Pi default"}
+          title="Subagent model"
+          items={items}
+          selected={model ? modelKey(model) : ""}
+          disabled={false}
+          searchPlaceholder="Search models"
+          onSelect={(key) => {
+            const chosen = listed.find((item) => modelKey(item) === key)!;
+            send({ type: "set_subagent_model", provider: chosen.provider, modelId: chosen.id });
+          }}
+        />
+      </div>
+      <div className="settings-row">
+        <span>Thinking level</span>
+        <Menu
+          icon={<Brain size={14} />}
+          label={thinkingLevel ? levelName(thinkingLevel) : "Pi default"}
+          title="Subagent thinking level"
+          items={LEVELS.map((level) => ({ key: level, label: levelName(level) }))}
+          selected={thinkingLevel ?? ""}
+          disabled={false}
+          onSelect={(key) => send({ type: "set_subagent_thinking_level", level: key as ThinkingLevel })}
+        />
+      </div>
+      {!models.length && <p className="settings-note">Open a session to load the models.</p>}
+    </>
+  );
+}
+
+/**
+ * The settings page. The browser keeps the microphone choice, so a run does not block it. The server keeps the subagent
+ * settings.
+ */
+export function Settings({
+  subagent,
+  send,
+  onBack,
+}: {
+  subagent: { choice: ModelChoice; models: ModelRef[] } | null;
+  send: (message: ClientMessage) => void;
+  onBack?: () => void;
+}) {
+  useEffect(() => send({ type: "get_subagent" }), []);
   return (
     <main className="settings">
       <div className="settings-inner">
@@ -85,6 +148,10 @@ export function Settings({ onBack }: { onBack?: () => void }) {
             <span>Microphone</span>
             <MicrophoneMenu />
           </div>
+        </section>
+        <section className="settings-section">
+          <h2>Subagents</h2>
+          <SubagentMenus choice={subagent?.choice ?? {}} models={subagent?.models ?? []} send={send} />
         </section>
         {onBack && (
           <button className="link" onClick={onBack}>

@@ -50,7 +50,7 @@ export function App() {
   const running = session?.state.running ?? false;
   const showChat = session && !picking && page === null && !loading;
 
-  const { send, socketRef, connected, remoteUrl, listing, projects, statuses, tasks, branchState } =
+  const { send, socketRef, connected, remoteUrl, listing, projects, statuses, tasks, branchState, subagent } =
     useServerConnection({ draft, setSession, setLoading, setErrors, setPicking, setCwd, setUsage });
 
   useEffect(() => {
@@ -346,7 +346,7 @@ export function App() {
         )}
 
         {page === "settings" ? (
-          <Settings onBack={session ? () => setPage(null) : undefined} />
+          <Settings subagent={subagent} send={send} onBack={session ? () => setPage(null) : undefined} />
         ) : page === "dashboard" ? (
           <Dashboard days={usage} onBack={session ? () => setPage(null) : undefined} />
         ) : loading ? (

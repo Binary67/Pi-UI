@@ -5,7 +5,16 @@ import { join } from "node:path";
 import type { WebSocket } from "ws";
 import type { ClientMessage } from "../shared/protocol.ts";
 import { listFolders, toPath } from "./folders.ts";
-import { broadcast, broadcastProjects, refresh, send, sendBranch, sendProjectBranches, tasksMessage } from "./messages.ts";
+import {
+  broadcast,
+  broadcastProjects,
+  knownModels,
+  refresh,
+  send,
+  sendBranch,
+  sendProjectBranches,
+  tasksMessage,
+} from "./messages.ts";
 import {
   addOrchestrator,
   addProject,
@@ -36,7 +45,8 @@ import {
   takeSpare,
   WORKTREES_DIR,
 } from "./sessions.ts";
-import { clients, sessions, views } from "./state.ts";
+import { getChoice, saveChoice } from "./settings.ts";
+import { clients, type Session, sessions, views } from "./state.ts";
 import { isActive } from "./tasks.ts";
 import { transcribe } from "./transcribe.ts";
 import { readUsage } from "./usage.ts";
@@ -140,6 +150,12 @@ async function dropOrchestrator(file: string): Promise<void> {
   );
 }
 
+/** Remember what `session` uses now for the new sessions of its kind. A task session changes nothing. */
+function rememberChoice({ file, info }: Session): void {
+  if (findTask(file)) return;
+  saveChoice(findOrchestrator(file) ? "orchestrator" : "chat", { model: info.model, thinkingLevel: info.thinkingLevel });
+}
+
 // The starts of a page run one at a time, in order. Quick clicks then end on the session that the user chose last.
 export const starting = new Map<WebSocket, Promise<void>>();
 
@@ -153,6 +169,16 @@ export async function handle(socket: WebSocket, message: ClientMessage): Promise
       return send(socket, { type: "transcript", text: await transcribe(message.audio, message.mimeType) });
     case "get_usage":
       return send(socket, { type: "usage", days: await readUsage(SESSIONS_DIR, new Date()) });
+    case "get_subagent":
+      return send(socket, { type: "subagent", choice: getChoice("subagent"), models: knownModels() });
+    case "set_subagent_model":
+    case "set_subagent_thinking_level": {
+      const choice = { ...getChoice("subagent") };
+      if (message.type === "set_subagent_model") choice.model = { provider: message.provider, id: message.modelId };
+      else choice.thinkingLevel = message.level;
+      saveChoice("subagent", choice);
+      return broadcast({ type: "subagent", choice, models: knownModels() });
+    }
     case "start":
     case "orchestrator": {
       const run = (starting.get(socket) ?? Promise.resolve()).then(() =>
@@ -232,10 +258,12 @@ export async function handle(socket: WebSocket, message: ClientMessage): Promise
     }
     case "set_model":
       await session.pi.send({ type: "set_model", provider: message.provider, modelId: message.modelId });
-      return refresh(session);
+      await refresh(session);
+      return rememberChoice(session);
     case "set_thinking_level":
       await session.pi.send({ type: "set_thinking_level", level: message.level });
-      return refresh(session);
+      await refresh(session);
+      return rememberChoice(session);
     case "fork": {
       if (findOrchestrator(session.file) || findTask(session.file)) {
         throw new Error("An orchestrator or a task session cannot be forked.");
