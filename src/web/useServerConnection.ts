@@ -4,6 +4,8 @@ import type {
   BranchInfo,
   ClientMessage,
   FolderListing,
+  ModelChoice,
+  ModelRef,
   Project,
   ServerMessage,
   SessionSnapshot,
@@ -48,6 +50,8 @@ export function useServerConnection({ draft, setSession, setLoading, setErrors, 
   const [tasks, setTasks] = useState<Record<string, TaskSummary[]>>({});
   /** The last `branch` message. It counts only while the page shows the session of its file. */
   const [branchState, setBranchState] = useState<{ file: string; branch: BranchInfo | null } | null>(null);
+  /** The last `subagent` message: the subagent choice and the model list. */
+  const [subagent, setSubagent] = useState<{ choice: ModelChoice; models: ModelRef[] } | null>(null);
 
   useEffect(() => {
     let socket: WebSocket;
@@ -155,6 +159,9 @@ export function useServerConnection({ draft, setSession, setLoading, setErrors, 
           case "info":
             setSession((current) => (current?.file === data.file ? { ...current, info: data.info } : current));
             break;
+          case "subagent":
+            setSubagent({ choice: data.choice, models: data.models });
+            break;
           case "branch":
             setBranchState({ file: data.file, branch: data.branch });
             break;
@@ -234,5 +241,5 @@ export function useServerConnection({ draft, setSession, setLoading, setErrors, 
     socketRef.current?.send(JSON.stringify(message));
   }
 
-  return { send, socketRef, connected, remoteUrl, listing, projects, statuses, tasks, branchState };
+  return { send, socketRef, connected, remoteUrl, listing, projects, statuses, tasks, branchState, subagent };
 }

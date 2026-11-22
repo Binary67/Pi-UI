@@ -10,6 +10,9 @@ test("a valid message passes", () => {
     { type: "fork", file: "a.jsonl", timestamp: 5 },
     { type: "switch_branch", file: "a.jsonl", branch: "main", create: false },
     { type: "set_thinking_level", file: "a.jsonl", level: "high" },
+    { type: "get_subagent" },
+    { type: "set_subagent_model", provider: "openai", modelId: "gpt-5" },
+    { type: "set_subagent_thinking_level", level: "low" },
     {
       type: "prompt",
       file: "a.jsonl",
@@ -38,6 +41,7 @@ test("a missing field throws", () => {
 test("a field of the wrong type throws", () => {
   assert.throws(() => parseClientMessage('{"type":"fork","file":"a","timestamp":"5"}'), /"fork" has a wrong field: timestamp/);
   assert.throws(() => parseClientMessage('{"type":"set_thinking_level","file":"a","level":"max"}'), /wrong field: level/);
+  assert.throws(() => parseClientMessage('{"type":"set_subagent_model","provider":"openai"}'), /wrong field: modelId/);
   assert.throws(
     () => parseClientMessage('{"type":"prompt","file":"a","text":"Hi","images":[{"data":"x"}],"streamingBehavior":"steer"}'),
     /wrong field: images/,

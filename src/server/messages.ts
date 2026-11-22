@@ -78,6 +78,14 @@ function modelRef({ provider, id }: ModelRef): ModelRef {
   return { provider, id };
 }
 
+// The last model list that `readInfo` read.
+let lastModels: ModelRef[] = [];
+
+/** The last model list that the server read. Empty before the first session. */
+export function knownModels(): ModelRef[] {
+  return lastModels;
+}
+
 export async function readInfo(pi: PiProcess): Promise<SessionInfo> {
   const [state, models, levels, stats] = await Promise.all([
     pi.send({ type: "get_state" }),
@@ -85,9 +93,10 @@ export async function readInfo(pi: PiProcess): Promise<SessionInfo> {
     pi.send({ type: "get_available_thinking_levels" }),
     pi.send({ type: "get_session_stats" }),
   ]);
+  lastModels = models.data.models.map(modelRef);
   return {
     model: state.data.model && modelRef(state.data.model),
-    models: models.data.models.map(modelRef),
+    models: [...lastModels],
     thinkingLevel: state.data.thinkingLevel,
     thinkingLevels: levels.data.levels,
     stats: stats.data,

@@ -19,11 +19,11 @@ function formatCost(cost: number): string {
   return `$${cost.toFixed(3)}`;
 }
 
-function levelName(level: ThinkingLevel): string {
+export function levelName(level: ThinkingLevel): string {
   return level === "xhigh" ? "XHigh" : level[0].toUpperCase() + level.slice(1);
 }
 
-function modelKey(model: ModelRef): string {
+export function modelKey(model: ModelRef): string {
   return `${model.provider}/${model.id}`;
 }
 
