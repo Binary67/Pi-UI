@@ -6,7 +6,15 @@ import { Composer, TOUCH, scrollToBottom } from "./Composer.tsx";
 import { createDraft } from "./composerDraft.ts";
 import { Dashboard } from "./Dashboard.tsx";
 import { groupTurns } from "./groupTurns.ts";
-import { Banner, MessageView, Skeleton, type ToolResults, WorkGroup, Working } from "./Message.tsx";
+import {
+  Banner,
+  MessageView,
+  type MessageViewProps,
+  Skeleton,
+  type ToolResults,
+  WorkGroup,
+  Working,
+} from "./Message.tsx";
 import { SessionFooter } from "./SessionFooter.tsx";
 import { Settings } from "./Settings.tsx";
 import { folderName, Sidebar } from "./Sidebar.tsx";
@@ -206,7 +214,7 @@ export function App() {
     : [];
   // One list, so a streamed message keeps its element when it completes.
   const items = useMemo(() => (streaming ? [...messages, streaming] : messages), [messages, streaming]);
-  const turns = useMemo(() => groupTurns(items, running), [items, running]);
+  const turns = useMemo(() => groupTurns(items, streaming), [items, streaming]);
   // The messages array changes only on `message_end`, so the map stays the same while streaming.
   const sessionMessages = session?.state.messages;
   const results = useMemo(() => {
@@ -228,30 +236,38 @@ export function App() {
     session && Object.values(tasks).some((list) => list.some((task) => task.file === session.file));
   // The server rejects a fork of an orchestrator or a task session.
   const canFork = session && orchestrator?.file !== session.file && !taskSession;
-  const view = (message: AgentMessage, index: number) => (
+  const view = (message: AgentMessage, key: number | string, extra?: Pick<MessageViewProps, "part" | "children">) => (
     <MessageView
-      key={index}
+      key={key}
       message={message}
       results={results}
       running={running}
       streaming={message === streaming}
       onFork={canFork ? fork : undefined}
+      {...extra}
     />
   );
-  // The keys stay the item indexes, so the final answer keeps its element when the turn collapses.
+  // The keys stay the item indexes, so the answer keeps its element when the turn collapses.
   const thread: ReactNode[] = [];
   for (const { start, messages: turn, work } of turns) {
-    if (work) {
-      const { first, last, tools, duration } = work;
+    if (!work) {
+      thread.push(...turn.map((message, index) => view(message, start + index)));
+    } else if (work.earlier && work.first === 1 && turn[0].role === "custom") {
+      const children = turn.slice(1).map((message, index) => view(message, start + 1 + index));
+      thread.push(view(turn[0], start, { children }));
+    } else {
+      const { first, last, tools, duration, thinking, earlier } = work;
       thread.push(
         ...turn.slice(0, first).map((message, index) => view(message, start + index)),
         <WorkGroup key={`work-${start}`} duration={duration} tools={tools}>
           {turn.slice(first, last).map((message, index) => view(message, start + first + index))}
+          {thinking && view(turn[last], `thinking-${start + last}`, { part: "thinking" })}
         </WorkGroup>,
-        ...turn.slice(last).map((message, index) => view(message, start + last + index)),
+        ...turn.slice(last).map((message, index) => {
+          const showText = index === 0 && !earlier;
+          return view(message, start + last + index, showText ? { part: "text" } : undefined);
+        }),
       );
-    } else {
-      thread.push(...turn.map((message, index) => view(message, start + index)));
     }
   }
 
