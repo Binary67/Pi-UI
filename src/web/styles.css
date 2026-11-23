@@ -249,6 +249,18 @@ textarea::placeholder {
   text-align: left;
 }
 
+.project-name-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0 4px;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  outline: none;
+}
+
 .project-name {
   flex: 1;
   min-width: 0;

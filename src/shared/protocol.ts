@@ -71,6 +71,7 @@ export type ClientMessage =
   /** Switch the project of the session in `file` to `branch`. With `create`, make the branch from the current commit first. */
   | { type: "switch_branch"; file: string; branch: string; create: boolean }
   | { type: "remove_project"; path: string }
+  | { type: "rename_project"; path: string; name: string }
   /** An orchestrator goes with the sessions of its tasks. Its active tasks are cancelled. */
   | { type: "remove_session"; file: string }
   /** List the subfolders of `path`, or of the home folder when `path` is empty. */
@@ -91,7 +92,7 @@ export type SessionSummary = { file: string; title: string; unread: boolean };
 export type SessionStatus = "running" | "warm";
 
 /** The orchestrator sessions of a project, newest first. They are not in `sessions`. */
-export type Project = { path: string; sessions: SessionSummary[]; orchestrators: SessionSummary[] };
+export type Project = { path: string; name?: string; sessions: SessionSummary[]; orchestrators: SessionSummary[] };
 
 /** The tasks of an orchestrator run in parallel. A task is active while it is `running` or in `review`. A task with a worktree keeps it during that time. */
 export type TaskStatus = "running" | "review" | "done" | "cancelled";

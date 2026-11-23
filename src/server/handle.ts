@@ -27,6 +27,7 @@ import {
   markRead,
   removeOrchestrator,
   removeProject,
+  renameProject,
   removeSession,
   saveTasks,
 } from "./projects.ts";
@@ -191,6 +192,9 @@ export async function handle(socket: WebSocket, message: ClientMessage): Promise
       await Promise.all(getOrchestrators(message.path).map((orchestrator) => dropOrchestrator(orchestrator.file)));
       removeProject(message.path);
       dropSpare(message.path);
+      return broadcastProjects();
+    case "rename_project":
+      renameProject(message.path, message.name);
       return broadcastProjects();
     case "remove_session":
       // An orchestrator goes with its tasks.

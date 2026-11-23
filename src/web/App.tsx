@@ -315,7 +315,7 @@ export function App() {
           {showChat && (
             <span className="chip" title={session.cwd}>
               <Folder size={14} />
-              <span>{folderName(session.cwd)}</span>
+              <span>{sessionProject?.name ?? folderName(session.cwd)}</span>
             </span>
           )}
           <div className="header-actions">

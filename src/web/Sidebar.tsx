@@ -11,7 +11,7 @@ import {
   Workflow,
   X,
 } from "lucide-react";
-import { Fragment } from "react";
+import { Fragment, useRef, useState } from "react";
 import type {
   ClientMessage,
   Project,
@@ -79,6 +79,19 @@ export function Sidebar({
   onRemoveProject,
   onRemoveOrchestrator,
 }: SidebarProps) {
+  /** The path of the project whose name the user edits. */
+  const [editing, setEditing] = useState<string | null>(null);
+  // Set by Escape, so that the blur of the closing input does not commit.
+  const cancelled = useRef(false);
+
+  function commitName(project: Project, value: string) {
+    setEditing(null);
+    const name = value.trim();
+    if (!cancelled.current && name !== (project.name ?? "") && name !== folderName(project.path)) {
+      send({ type: "rename_project", path: project.path, name });
+    }
+  }
+
   /** The row of a session in the sidebar, for a normal session and for a task session of an orchestrator. */
   function sessionRow(project: Project, item: SessionSummary) {
     const status = statuses[item.file];
@@ -149,10 +162,35 @@ export function Sidebar({
           return (
             <section key={project.path} className="project">
               <div className="project-row" title={project.path}>
-                <button className="project-toggle" onClick={() => onToggleProject(project.path)}>
-                  {expanded.has(project.path) ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                  <span className="project-name">{folderName(project.path)}</span>
-                </button>
+                {editing === project.path ? (
+                  <div className="project-toggle">
+                    {expanded.has(project.path) ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    <input
+                      className="project-name-input"
+                      defaultValue={project.name ?? folderName(project.path)}
+                      autoFocus
+                      onFocus={(event) => event.currentTarget.select()}
+                      onBlur={(event) => commitName(project, event.currentTarget.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Escape") cancelled.current = true;
+                        if (event.key === "Enter" || event.key === "Escape") event.currentTarget.blur();
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <button className="project-toggle" onClick={() => onToggleProject(project.path)}>
+                    {expanded.has(project.path) ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    <span
+                      className="project-name"
+                      onDoubleClick={() => {
+                        cancelled.current = false;
+                        setEditing(project.path);
+                      }}
+                    >
+                      {project.name ?? folderName(project.path)}
+                    </span>
+                  </button>
+                )}
                 {project.path !== sessionCwd &&
                   !project.sessions.some((item) => statuses[item.file] === "running") &&
                   !project.orchestrators.some((item) => statuses[item.file] === "running") && (
