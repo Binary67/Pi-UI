@@ -32,6 +32,7 @@ const FIELDS: { [Type in ClientMessage["type"]]: Record<string, Check> } = {
   list_branches: { file: text },
   switch_branch: { file: text, branch: text, create: flag },
   remove_project: { path: text },
+  rename_project: { path: text, name: text },
   remove_session: { file: text },
   list_folders: { path: text },
   get_usage: {},

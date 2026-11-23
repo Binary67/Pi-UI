@@ -36,10 +36,10 @@ export type Task = Omit<TaskSummary, "activity"> & {
 export type Orchestrator = { id: string; file: string; tasks: Task[] };
 
 /**
- * A project folder, the session files that the UI keeps for it, its orchestrators in start order, and the files with a
- * run that ended unseen. Each orchestrator solves one problem.
+ * A project folder, its display name, the session files that the UI keeps for it, its orchestrators in start order, and
+ * the files with a run that ended unseen. Each orchestrator solves one problem. A project without `name` shows its folder name.
  */
-type StoredProject = { path: string; sessions: string[]; unread: string[]; orchestrators: Orchestrator[] };
+type StoredProject = { path: string; name?: string; sessions: string[]; unread: string[]; orchestrators: Orchestrator[] };
 
 let projects: StoredProject[] = load();
 
@@ -76,6 +76,16 @@ export function addProject(path: string): boolean {
 
 export function removeProject(path: string): void {
   projects = projects.filter((project) => project.path !== path);
+  save();
+}
+
+/** Set the display name of the project in `path`. An empty name resets it to the folder name. */
+export function renameProject(path: string, name: string): void {
+  const project = projects.find((item) => item.path === path);
+  if (!project) return;
+  const trimmed = name.trim();
+  if (trimmed) project.name = trimmed;
+  else delete project.name;
   save();
 }
 
@@ -185,11 +195,12 @@ export function markRead(file: string): boolean {
 /** Projects with their kept sessions, newest session first. Titles come from Pi's session files. */
 export async function listProjects(): Promise<Project[]> {
   return Promise.all(
-    projects.map(async ({ path, sessions, unread, orchestrators }) => {
+    projects.map(async ({ path, name, sessions, unread, orchestrators }) => {
       const listed = await listSessions(orchestrators.map(({ file }) => file));
       const titles = new Map(listed.map((info) => [info.path, info.title]));
       return {
         path,
+        name,
         sessions: (await listSessions(sessions)).map((info) => ({
           file: info.path,
           title: info.title,
