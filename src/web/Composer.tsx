@@ -49,7 +49,7 @@ type ComposerProps = {
 export function Composer({ draft, connected, running, sessionFile, atBottom, socketRef, send, onError }: ComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { text, images, transcribing } = useSyncExternalStore(draft.subscribe, draft.get);
-  const { setText, setImages, setTranscribing } = draft;
+  const { setText, setImages } = draft;
 
   // The keyboard of the composer shrinks the page. A reader at the bottom stays at the bottom, above the composer.
   useEffect(() => {
@@ -82,7 +82,7 @@ export function Composer({ draft, connected, running, sessionFile, atBottom, soc
     const files = [...event.clipboardData.files].filter((file) => IMAGE_TYPES.has(file.type));
     if (!files.length) return;
     event.preventDefault();
-    void Promise.all(files.map(readImage)).then((added) => setImages((current) => [...current, ...added]));
+    void Promise.all(files.map(readImage)).then((added) => setImages((current) => [...current, ...added], sessionFile));
   }
 
   // On a touch screen, Enter adds a new line, and the send button sends.
@@ -130,7 +130,7 @@ export function Composer({ draft, connected, running, sessionFile, atBottom, soc
             onError("Not connected. The recording is lost.");
             return;
           }
-          setTranscribing(true);
+          draft.waitTranscript(sessionFile);
           send({ type: "transcribe", audio, mimeType });
         }}
         onError={onError}

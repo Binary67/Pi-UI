@@ -150,8 +150,8 @@ export type ServerMessage =
   | { type: "subagent"; choice: ModelChoice; models: ModelRef[] }
   /** The branch of the session in `file`. Null when its folder is not in a git repository. */
   | { type: "branch"; file: string; branch: BranchInfo | null }
-  /** The text of the queued messages that an abort removed, for the composer. */
-  | { type: "restore"; text: string }
+  /** The text of the queued messages that an abort removed, for the composer of the session in `file`. */
+  | { type: "restore"; file: string; text: string }
   /** The text of the voice recording of a `transcribe` message, for the composer. */
   | { type: "transcript"; text: string }
   /** The usage of each local day of the last 30 days, oldest first, today last. A day without use has zeros. */

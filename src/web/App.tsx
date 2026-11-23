@@ -190,8 +190,8 @@ export function App() {
     (timestamp: number, forkText: string, forkImages: PromptImage[]) => {
       if (!sessionFile) return;
       send({ type: "fork", file: sessionFile, timestamp });
-      draft.setText(forkText);
-      draft.setImages(forkImages);
+      // The new session opens with the content. The draft of this session stays.
+      draft.holdFork(sessionFile, forkText, forkImages);
     },
     [sessionFile],
   );
