@@ -239,7 +239,7 @@ export async function handle(socket: WebSocket, message: ClientMessage): Promise
       // As with Esc in the TUI, queued messages go back to the composer. Otherwise they run after the abort.
       const { data } = await session.pi.send({ type: "clear_queue" });
       const text = [...data.steering, ...data.followUp].join("\n\n");
-      if (text) send(socket, { type: "restore", text });
+      if (text) send(socket, { type: "restore", file: session.file, text });
       await session.pi.send({ type: "abort" });
       return;
     }

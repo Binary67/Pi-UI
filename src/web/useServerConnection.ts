@@ -129,6 +129,7 @@ export function useServerConnection({ draft, setSession, setLoading, setErrors, 
             setErrors([]);
             setLoading(false);
             if (data.session) {
+              draft.open(data.session.file);
               setPicking(false);
               localStorage.setItem(VIEW_KEY, JSON.stringify({ cwd: data.session.cwd, file: data.session.file }));
             } else {
@@ -166,11 +167,14 @@ export function useServerConnection({ draft, setSession, setLoading, setErrors, 
             setBranchState({ file: data.file, branch: data.branch });
             break;
           case "restore":
-            draft.setText((current) => [data.text, current].filter((part) => part.trim()).join("\n\n"));
+            draft.setText((current) => [data.text, current].filter((part) => part.trim()).join("\n\n"), data.file);
             break;
           case "transcript":
-            draft.setText((current) => [current, data.text].filter((part) => part.trim()).join(" "));
-            draft.setTranscribing(false);
+            {
+              // The transcript has no file. It belongs to the session that sent the oldest recording.
+              const file = draft.takeTranscript();
+              if (file !== undefined) draft.setText((current) => [current, data.text].filter((part) => part.trim()).join(" "), file);
+            }
             break;
           case "usage":
             setUsage(data.days);
@@ -178,7 +182,9 @@ export function useServerConnection({ draft, setSession, setLoading, setErrors, 
           case "error":
             setErrors((current) => [...current, data.message]);
             setLoading(false);
-            draft.setTranscribing(false);
+            draft.dropTranscripts();
+            // A failed fork opens no session. Its content must not go to a later session.
+            draft.dropFork();
             break;
         }
       };
@@ -204,7 +210,8 @@ export function useServerConnection({ draft, setSession, setLoading, setErrors, 
       setConnected(false);
       setLoading(false);
       // The transcript of a recording is lost with the socket.
-      draft.setTranscribing(false);
+      draft.dropTranscripts();
+      draft.dropFork();
       timer = setTimeout(connect, delay);
       delay = Math.min(delay * 2, RECONNECT_MAX_MS);
     }
