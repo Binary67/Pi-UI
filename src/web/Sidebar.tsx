@@ -87,7 +87,7 @@ export function Sidebar({
   function commitName(project: Project, value: string) {
     setEditing(null);
     const name = value.trim();
-    if (!cancelled.current && name !== (project.name ?? "") && name !== folderName(project.path)) {
+    if (!cancelled.current && name !== (project.name ?? folderName(project.path))) {
       send({ type: "rename_project", path: project.path, name });
     }
   }
