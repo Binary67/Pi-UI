@@ -170,15 +170,16 @@ function formatDuration(ms: number): string {
   return minutes ? `${minutes}m ${seconds % 60}s` : `${seconds}s`;
 }
 
-/** The steps of a done turn, collapsed into one row above the final answer. */
-export function WorkGroup({ duration, tools, children }: { duration: number; tools: number; children: ReactNode }) {
+/** The steps of a turn, collapsed into one row above the answer. The duration is absent while the answer streams. */
+export function WorkGroup({ duration, tools, children }: { duration?: number; tools: number; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   return (
     <div>
       <button className="disclosure" onClick={() => setOpen(!open)} aria-expanded={open}>
         <ChevronRight size={14} className="chevron" />
         <span>
-          Worked for {formatDuration(duration)} · {tools} {tools === 1 ? "tool" : "tools"}
+          {duration === undefined ? "Working…" : `Worked for ${formatDuration(duration)}`} · {tools}{" "}
+          {tools === 1 ? "tool" : "tools"}
         </span>
       </button>
       {open && <div className="work-steps">{children}</div>}
@@ -294,8 +295,11 @@ function UserImages({ images }: { images: PromptImage[] }) {
   );
 }
 
-/** A task update in the orchestrator chat: one row with the task and its status. A click shows the full update. */
-function TaskUpdate({ message }: { message: CustomMessage }) {
+/**
+ * A task update in the orchestrator chat: one row with the task and its status. A click shows the full update, then
+ * the `children`: the other messages of a collapsed turn.
+ */
+function TaskUpdate({ message, children }: { message: CustomMessage; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const { id, title, status } = (message.details ?? {}) as Pick<TaskSummary, "id" | "title" | "status">;
   const text =
@@ -312,18 +316,27 @@ function TaskUpdate({ message }: { message: CustomMessage }) {
         </span>
         <span className={`badge ${status}`}>{TASK_LABELS[status]}</span>
       </button>
-      {open && <div className="thinking-text">{text}</div>}
+      {open && (
+        <>
+          <div className="thinking-text">{text}</div>
+          {children && <div className="work-steps">{children}</div>}
+        </>
+      )}
     </div>
   );
 }
 
-type MessageViewProps = {
+export type MessageViewProps = {
   message: AgentMessage;
   results: ToolResults;
   /** True while the session runs. */
   running: boolean;
   /** True when this message is still streaming. */
   streaming: boolean;
+  /** Show only the text blocks of an assistant message, or only its thinking blocks. */
+  part?: "text" | "thinking";
+  /** The other messages of a collapsed turn. A task update shows them when it is open. */
+  children?: ReactNode;
   /** Fork the session before a user message. Gets the timestamp, text, and images of the message. Absent when the session cannot be forked. */
   onFork?: (timestamp: number, text: string, images: PromptImage[]) => void;
 };
@@ -333,6 +346,8 @@ export const MessageView = memo(function MessageView({
   results,
   running,
   streaming,
+  part,
+  children,
   onFork,
 }: MessageViewProps) {
   if (message.role === "user") {
@@ -369,13 +384,14 @@ export const MessageView = memo(function MessageView({
       </div>
     );
   }
-  if (message.role === "custom") return message.customType === "task_update" ? <TaskUpdate message={message} /> : null;
+  if (message.role === "custom") return message.customType === "task_update" ? <TaskUpdate message={message}>{children}</TaskUpdate> : null;
   if (message.role !== "assistant") return null;
 
   const text = message.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("\n\n");
   return (
     <div className="message assistant">
       {message.content.map((block, index) => {
+        if (part && block.type !== part) return null;
         if (block.type === "text") return block.text.trim() && <MarkdownText key={index} text={block.text} />;
         if (block.type === "thinking") {
           const active = streaming && index === message.content.length - 1;
@@ -383,8 +399,8 @@ export const MessageView = memo(function MessageView({
         }
         return <ToolCard key={index} call={block} result={results.get(block.id)} running={running} />;
       })}
-      {message.errorMessage && <Banner>{message.errorMessage}</Banner>}
-      {!streaming && message.stopReason !== "toolUse" && text.trim() && (
+      {part !== "thinking" && message.errorMessage && <Banner>{message.errorMessage}</Banner>}
+      {part !== "thinking" && !streaming && message.stopReason !== "toolUse" && text.trim() && (
         <div className="message-actions">
           <CopyAction text={text} />
         </div>
