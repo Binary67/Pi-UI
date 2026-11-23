@@ -161,7 +161,7 @@ export function Sidebar({
           );
           return (
             <section key={project.path} className="project">
-              <div className="project-row" title={project.path}>
+              <div className="project-row" title={editing === project.path ? undefined : project.path}>
                 {editing === project.path ? (
                   <div className="project-toggle">
                     {expanded.has(project.path) ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
@@ -191,23 +191,27 @@ export function Sidebar({
                     </span>
                   </button>
                 )}
-                {project.path !== sessionCwd &&
-                  !project.sessions.some((item) => statuses[item.file] === "running") &&
-                  !project.orchestrators.some((item) => statuses[item.file] === "running") && (
-                    <button className="row-action" onClick={() => onRemoveProject(project)} title="Remove project">
-                      <X size={14} />
+                {editing !== project.path && (
+                  <>
+                    {project.path !== sessionCwd &&
+                      !project.sessions.some((item) => statuses[item.file] === "running") &&
+                      !project.orchestrators.some((item) => statuses[item.file] === "running") && (
+                        <button className="row-action" onClick={() => onRemoveProject(project)} title="Remove project">
+                          <X size={14} />
+                        </button>
+                      )}
+                    <button
+                      className="row-action new-orchestrator"
+                      onClick={() => onStartOrchestrator(project.path)}
+                      title="New orchestrator"
+                    >
+                      <Workflow size={14} />
                     </button>
-                  )}
-                <button
-                  className="row-action new-orchestrator"
-                  onClick={() => onStartOrchestrator(project.path)}
-                  title="New orchestrator"
-                >
-                  <Workflow size={14} />
-                </button>
-                <button className="row-action new-session" onClick={() => onStart(project.path)} title="New session">
-                  <SquarePen size={14} />
-                </button>
+                    <button className="row-action new-session" onClick={() => onStart(project.path)} title="New session">
+                      <SquarePen size={14} />
+                    </button>
+                  </>
+                )}
               </div>
               {expanded.has(project.path) && (
                 <ul className="sessions">
