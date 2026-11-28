@@ -110,9 +110,9 @@ function text(message: AssistantMessage): string {
 }
 
 /** The last answer of the subagent, with its error. */
-function report(state: ChatState): string {
-  const message = state.messages.findLast((item) => item.role === "assistant");
-  if (!message) return "(no answer)";
+export function lastAnswer(messages: AgentMessage[]): string {
+  const message = messages.findLast((item) => item.role === "assistant" || item.role === "user");
+  if (message?.role !== "assistant") return "(no answer)";
   const parts = [text(message), message.errorMessage && `Error: ${message.errorMessage}`];
   return parts.filter(Boolean).join("\n\n") || "(no text)";
 }
@@ -189,16 +189,16 @@ export function describeTask(task: Task, state?: ChatState, cost?: number, chang
 
 /**
  * The task update for the orchestrator, after a run of the task ended. `changes` is absent when the task has no
- * worktree. `state` is absent when the task did not start.
+ * worktree. The answer and direct-message flag belong to the run that produced this update.
  */
-export function updateText(task: Task, changes?: Changes, state?: ChatState): string {
+export function updateText(task: Task, changes?: Changes): string {
   return [
     `Task ${task.id} "${task.title}" is now in ${task.status}.`,
     task.note && `Note: ${task.note}`,
-    task.direct && "The user sent messages to this subagent directly.",
+    task.pendingResult?.direct && "The user sent messages to this subagent directly.",
     task.worktree && `Branch: ${task.worktree.branch}`,
     changes && changesText(changes),
-    state && `Last answer of the subagent:\n\n${report(state)}`,
+    task.pendingResult?.answer && `Last answer of the subagent:\n\n${task.pendingResult.answer}`,
   ]
     .filter(Boolean)
     .join("\n\n");

@@ -61,7 +61,7 @@ const recovery: Promise<void>[] = [];
 for (const path of projectPaths()) {
   for (const { tasks } of getOrchestrators(path)) {
     for (const task of tasks.filter((item) => item.status === "review" && item.pending)) {
-      recovery.push(report(path, task, { ...task }).catch((error: unknown) =>
+      recovery.push(report(path, task).catch((error: unknown) =>
         console.error(`Could not send the update of task ${task.id}:`, error),
       ));
     }

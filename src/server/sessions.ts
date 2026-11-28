@@ -30,7 +30,7 @@ import {
   saveTasks,
   type Task,
 } from "./projects.ts";
-import { moveSession } from "./session-files.ts";
+import { moveSession, savedAnswer } from "./session-files.ts";
 import { getChoice } from "./settings.ts";
 import { type Session, sessions, views } from "./state.ts";
 import {
@@ -38,6 +38,7 @@ import {
   type Changes,
   describeTask,
   isActive,
+  lastAnswer,
   outside,
   overlap,
   runningText,
@@ -361,7 +362,7 @@ function followTask(session: Session, event: JsonAgentSessionEvent): void {
   const { path, task } = found;
   // A task in review runs again when the user sends a message to its subagent directly.
   if (event.type === "agent_start" && task.status === "review") {
-    Object.assign(task, { status: "running", started: Date.now(), note: undefined });
+    Object.assign(task, { status: "running", started: Date.now(), note: undefined, pending: false, pendingResult: undefined });
     saveTasks();
   }
   if (event.type === "agent_settled" && task.status === "running") {
@@ -376,18 +377,25 @@ function followTask(session: Session, event: JsonAgentSessionEvent): void {
 /** Move a running task to review. Then commit its changes if it has a worktree, and send the task update to the orchestrator. */
 function toReview(path: string, task: Task, note: string | undefined, state?: ChatState): void {
   Object.assign(task, { status: "review", note });
-  // The update describes the task as it is now, also when the task changes during the commit.
-  const update = { ...task };
+  task.pendingResult = { answer: state && lastAnswer(state.messages), direct: task.direct };
   task.direct = false;
   task.pending = true;
   saveTasks();
-  report(path, task, update, state).catch((error: unknown) =>
+  report(path, task).catch((error: unknown) =>
     console.error(`Could not send the update of task ${task.id}:`, error),
   );
 }
 
-/** Commit the changes of `task`, so that its branch is complete for the review and the merge. Then send `update`. */
-export async function report(path: string, task: Task, update: Task, state?: ChatState): Promise<void> {
+/** Commit the worktree, then deliver the saved result of this run. */
+export async function report(path: string, task: Task): Promise<void> {
+  if (!task.pendingResult) {
+    const answer = task.file && await savedAnswer(task.file, task.started ?? 0);
+    if (task.status !== "review" || !task.pending || task.pendingResult) return;
+    task.pendingResult = { answer, direct: task.direct };
+    task.direct = false;
+    saveTasks();
+  }
+  const update = { ...task };
   if (task.worktree) {
     const { worktree } = task;
     await checkBranch(worktree)
@@ -401,7 +409,9 @@ export async function report(path: string, task: Task, update: Task, state?: Cha
     update.note = [update.note, `The server could not read the changes: ${errorText(error)}`].filter(Boolean).join(" ");
     return undefined;
   });
-  await notify(path, task, update, updateText(update, changes, state));
+  if (task.status === "review" && task.pendingResult === update.pendingResult) {
+    await notify(path, task, update, updateText(update, changes));
+  }
 }
 
 /** Throws unless the worktree `dir` is on its task branch `branch`. A commit on another branch would not reach the task branch. */
@@ -444,7 +454,7 @@ async function deliver(file: string): Promise<void> {
   for (const [task, entry] of queue) {
     const { path, update, text } = entry;
     // An update that is out of date must not open the session of the orchestrator.
-    if (task.status !== "review") {
+    if (task.status !== "review" || task.pendingResult !== update.pendingResult) {
       queue.delete(task);
       continue;
     }
@@ -454,7 +464,7 @@ async function deliver(file: string): Promise<void> {
       const session = await open(path, file);
       try {
         // The task can be cancelled or run again while the session opens.
-        if (task.status === "review") {
+        if (task.status === "review" && task.pendingResult === update.pendingResult) {
           const details = { id: update.id, title: update.title, status: update.status, note: update.note };
           // The list of the other running tasks is built now, because the update can be held for a long time.
           const others = findOrchestrator(file)?.orchestrator.tasks.filter((item) => item !== task && item.status === "running");
@@ -465,9 +475,10 @@ async function deliver(file: string): Promise<void> {
             streamingBehavior: "followUp",
           });
           // The entry stays in the queue until the send worked. A newer update of the task can replace it meanwhile.
-          if (queue.get(task) === entry) {
+          if (queue.get(task) === entry && task.pendingResult === update.pendingResult) {
             queue.delete(task);
             task.pending = false;
+            delete task.pendingResult;
             saveTasks();
           }
           return;
@@ -509,7 +520,7 @@ function startTask(path: string, task: Task): void {
  * folder when the task has no worktree, with the task prompt.
  */
 async function launchTask(path: string, task: Task, signal: AbortSignal): Promise<void> {
-  Object.assign(task, { status: "running", started: Date.now(), note: undefined });
+  Object.assign(task, { status: "running", started: Date.now(), note: undefined, pending: false, pendingResult: undefined });
   saveTasks();
   broadcastTasks();
   try {
@@ -545,6 +556,8 @@ export async function closeTask(path: string, task: Task): Promise<void> {
       await removeWorktree(path, task.worktree.dir, task.worktree.branch);
       if (task.file) await moveSession(task.file, path);
     }
+    task.pending = false;
+    delete task.pendingResult;
   } finally {
     closingTasks.delete(task);
   }

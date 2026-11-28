@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { ChatState } from "../shared/chat-state.ts";
 import type { Task } from "./projects.ts";
-import { allocateTasks, outside, overlap, runningText, taskPrompt, updateText } from "./tasks.ts";
+import { allocateTasks, lastAnswer, outside, overlap, runningText, taskPrompt, updateText } from "./tasks.ts";
 
 function task(id: number, additions: string[] = []): Task {
   return {
@@ -20,11 +19,6 @@ function task(id: number, additions: string[] = []): Task {
 /** A task without a worktree, without owned files, and without a contract. */
 function plain(id: number, additions: string[] = []): Task {
   return { id, title: `Task ${id}`, status: "review", prompt: `Do ${id}.`, files: [], additions };
-}
-
-function answer(text: string): ChatState {
-  const message = { role: "assistant", content: [{ type: "text", text }] };
-  return { messages: [message] } as unknown as ChatState;
 }
 
 test("owned files overlap when they are equal, or when a folder covers a file", () => {
@@ -108,13 +102,17 @@ test("the running text lists the tasks that still run", () => {
 });
 
 test("the task update of a task without a worktree has no branch and no changed files", () => {
-  const text = updateText(plain(2), undefined, answer("Done."));
+  const text = updateText({ ...plain(2), pendingResult: { answer: "Done." } });
   assert.equal(text, `Task 2 "Task 2" is now in review.\n\nLast answer of the subagent:\n\nDone.`);
   assert.ok(!text.includes("Branch:"));
   assert.ok(!text.includes("hanged files"));
 });
 
-test("the task update does not cut a long last answer", () => {
+test("a persisted pending update retains the full answer and the direct-message flag of that run", () => {
   const long = "x".repeat(5000);
-  assert.ok(updateText(plain(2), undefined, answer(long)).endsWith(`\n\n${long}`));
+  const answer = lastAnswer([{ role: "assistant", content: [{ type: "text", text: long }], timestamp: 10, stopReason: "stop" }]);
+  const task = { ...plain(2), pending: true, direct: false, pendingResult: { answer, direct: true } };
+  const text = updateText(JSON.parse(JSON.stringify(task)));
+  assert.match(text, /sent messages to this subagent directly/);
+  assert.ok(text.endsWith(`\n\n${long}`));
 });

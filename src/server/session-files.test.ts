@@ -3,7 +3,7 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
-import { forkSession, listSessions, moveSession } from "./session-files.ts";
+import { forkSession, listSessions, moveSession, savedAnswer } from "./session-files.ts";
 
 async function fixture(t: TestContext): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "pi-ui-sessions-"));
@@ -21,6 +21,17 @@ async function writeSession(dir: string, name: string, entries: unknown[], times
 function message(id: string, parentId: string | null, value: { role: string; timestamp: number; [key: string]: unknown }) {
   return { type: "message", id, parentId, timestamp: new Date(value.timestamp).toISOString(), message: value };
 }
+
+test("report recovery follows the saved branch and skips answers before the interrupted run", async (t) => {
+  const file = await writeSession(await fixture(t), "task", [
+    message("u", null, { role: "user", content: "Research", timestamp: 100 }),
+    message("a", "u", { role: "assistant", content: [{ type: "text", text: "Result" }], timestamp: 105 }),
+    message("b", "u", { role: "assistant", content: [{ type: "text", text: "Other branch" }], timestamp: 106 }),
+    { type: "session_info", id: "name", parentId: "a", name: "task" },
+  ]);
+  assert.equal(await savedAnswer(file, 100), "Result");
+  assert.equal(await savedAnswer(file, 110), undefined);
+});
 
 test("session listing uses message activity, titles, and strict LF framing", async (t) => {
   const dir = await fixture(t);

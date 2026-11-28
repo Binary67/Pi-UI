@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFile, rename, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { AgentMessage } from "../shared/pi-rpc.ts";
+import { lastAnswer } from "./tasks.ts";
 
 type SessionHeader = { type: "session"; version: 3; id: string; timestamp: string; cwd: string; parentSession?: string };
 type SessionEntry = {
@@ -34,6 +35,22 @@ async function readSession(file: string): Promise<{ header: SessionHeader; entri
 
 function sessionName(entries: SessionEntry[]): string | undefined {
   return entries.findLast((entry) => entry.type === "session_info")?.name?.trim() || undefined;
+}
+
+/** Recover a report when Pi saved the conversation but the server had not saved the result yet. */
+export async function savedAnswer(file: string, started: number): Promise<string | undefined> {
+  const saved = await readSession(file).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return undefined; // Pi did not save the interrupted session.
+    throw error;
+  });
+  if (!saved) return;
+  const { entries } = saved;
+  const byId = new Map(entries.map((entry) => [entry.id, entry]));
+  for (let entry = entries.at(-1); entry; entry = entry.parentId ? byId.get(entry.parentId) : undefined) {
+    const message = entry.message;
+    if (entry.type !== "message" || !message || (message.role !== "assistant" && message.role !== "user")) continue;
+    return message.timestamp >= started ? lastAnswer([message]) : undefined;
+  }
 }
 
 function messageText(message: AgentMessage): string {
