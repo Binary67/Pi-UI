@@ -19,15 +19,29 @@ export function isActive(task: Task): boolean {
   return task.status === "running" || task.status === "review";
 }
 
+// Only the check and allocation of a batch are serialized. Subagents run outside this queue.
+const allocations = new Map<string, Promise<string>>();
+
+export async function allocateTasks(path: string, allocate: () => Promise<string>): Promise<string> {
+  const previous = allocations.get(path) ?? Promise.resolve();
+  const run = previous.then(allocate, allocate);
+  allocations.set(path, run);
+  try {
+    return await run;
+  } finally {
+    if (allocations.get(path) === run) allocations.delete(path);
+  }
+}
+
 /** True when the owned path `owner` covers `path`. An owned path that ends with `/` covers its folder. */
 export function covers(owner: string, path: string): boolean {
   return owner === path || (owner.endsWith("/") && path.startsWith(owner));
 }
 
 /** The first owned paths that two of `tasks` share, as text. Undefined when no owned files overlap. */
-export function overlap(tasks: Pick<Task, "title" | "files">[]): string | undefined {
+export function overlap(tasks: Pick<Task, "title" | "files">[], owners: Pick<Task, "title" | "files">[] = []): string | undefined {
   for (const [index, a] of tasks.entries()) {
-    for (const b of tasks.slice(index + 1)) {
+    for (const b of [...owners, ...tasks.slice(index + 1)]) {
       for (const x of a.files) {
         const y = b.files.find((file) => covers(x, file) || covers(file, x));
         if (y !== undefined) return `"${x}" of "${a.title}" and "${y}" of "${b.title}"`;

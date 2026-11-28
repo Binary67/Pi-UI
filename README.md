@@ -65,7 +65,7 @@ way.
 3. Tasks that must fit together get a shared contract: interfaces, types, names, and decisions. The prompt of each task
    has the goal, the owned files, the inputs, the outputs, and the acceptance criteria with the checks to run. A
    subagent does not see the conversation, so a prompt must stand alone. Owned files are optional. A file belongs to
-   only one active task. Two tasks that need the same file run one after the other.
+   only one active task across all orchestrators of the project. Two tasks that need the same file run one after the other.
 4. A task that changes files starts only after you agree to the plan: the prompts, the contract, and the setup command.
    A task that changes nothing, such as research, can start without approval. Its prompt says `Do not change files.`
 5. A task with a worktree gets a new git worktree in `~/.pi-ui/worktrees/<orchestrator id>/task-<task id>` and a new

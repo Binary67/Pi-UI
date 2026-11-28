@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Project, TaskSummary } from "../shared/protocol.ts";
 import { listSessions } from "./session-files.ts";
+import { isActive } from "./tasks.ts";
 
 const FILE = join(homedir(), ".pi-ui", "projects.json");
 
@@ -111,6 +112,15 @@ export function projectPaths(): string[] {
 /** The orchestrators of the project in `path`. */
 export function getOrchestrators(path: string): Orchestrator[] {
   return projects.find((project) => project.path === path)?.orchestrators ?? [];
+}
+
+// Closing tasks keep their files until their processes actually stop, even after removal from the sidebar.
+export const closingTasks = new Map<Task, string>();
+
+export function activeProjectTasks(path: string): Task[] {
+  const active = getOrchestrators(path).flatMap(({ tasks }) => tasks.filter(isActive));
+  for (const [task, project] of closingTasks) if (project === path) active.push(task);
+  return active;
 }
 
 /** The orchestrator in `file`, and its project path. The server changes its tasks in place, then calls `saveTasks`. */

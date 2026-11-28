@@ -17,6 +17,8 @@ import {
 } from "./messages.ts";
 import { PiProcess } from "./pi-process.ts";
 import {
+  activeProjectTasks,
+  closingTasks,
   findOrchestrator,
   findTask,
   getOrchestrators,
@@ -30,6 +32,7 @@ import { moveSession } from "./session-files.ts";
 import { getChoice } from "./settings.ts";
 import { type Session, sessions, views } from "./state.ts";
 import {
+  allocateTasks,
   type Changes,
   describeTask,
   isActive,
@@ -500,13 +503,17 @@ async function launchTask(path: string, task: Task, signal: AbortSignal): Promis
 
 /** Stop the subagent of `task`. Then delete its worktree and branch, if it has them. The session moves to the project folder. */
 export async function closeTask(path: string, task: Task): Promise<void> {
-  // The worktree stays until the setup and the subagent have ended. A running setup command stops now.
-  aborts.get(task)?.abort();
-  await launches.get(task);
-  if (task.file) await stopSession(task.file);
-  if (task.worktree) {
-    await removeWorktree(path, task.worktree.dir, task.worktree.branch);
-    if (task.file) await moveSession(task.file, path);
+  closingTasks.set(task, path);
+  try {
+    aborts.get(task)?.abort();
+    await launches.get(task);
+    if (task.file) await stopSession(task.file);
+    if (task.worktree) {
+      await removeWorktree(path, task.worktree.dir, task.worktree.branch);
+      if (task.file) await moveSession(task.file, path);
+    }
+  } finally {
+    closingTasks.delete(task);
   }
 }
 
@@ -522,8 +529,9 @@ async function closeOrBack(path: string, task: Task): Promise<void> {
 
 type TaskSpec = Pick<Task, "title" | "prompt"> & { worktree: boolean; files?: string[] };
 /** The parameters of the task tools. Pi checks them against the schemas of the extension, so each tool gets its own. */
+type Batch = { contract?: string; setup?: string; tasks: TaskSpec[] };
 type ToolCall =
-  | { name: "start_tasks"; params: { contract?: string; setup?: string; tasks: TaskSpec[] } }
+  | { name: "start_tasks"; params: Batch }
   | { name: "list_tasks"; params: Record<string, never> }
   | { name: "get_task" | "finish_task" | "cancel_task"; params: { id: number } }
   | { name: "message_task"; params: { id: number; text: string; mode: StreamingBehavior } };
@@ -540,45 +548,52 @@ async function runTool(file: string, name: string, params: unknown): Promise<str
   }
 }
 
+async function startBatch(path: string, orchestrator: Orchestrator, params: Batch): Promise<string> {
+  const { tasks } = orchestrator;
+  if (!findOrchestrator(orchestrator.file)) throw new Error("The orchestrator was removed.");
+  if (params.tasks.some((spec) => spec.worktree)) await checkRepo(path);
+  const owners = activeProjectTasks(path);
+  const conflict = overlap(params.tasks.map(({ title, files = [] }) => ({ title, files })), owners);
+  if (conflict) throw new Error(`The owned files overlap: ${conflict}. A file can belong to only one active task.`);
+  // Phase 1 makes all worktrees. When one fails, none of the tasks starts.
+  const first = Math.max(0, ...tasks.map((task) => task.id)) + 1;
+  const made: Task[] = [];
+  const undo = () =>
+    Promise.all(made.flatMap(({ worktree }) => (worktree ? [removeWorktree(path, worktree.dir, worktree.branch).catch(() => {})] : [])));
+  for (const [index, spec] of params.tasks.entries()) {
+    const id = first + index;
+    const { title, prompt, files = [] } = spec;
+    const { contract } = params;
+    const task: Task = { id, title, status: "running", prompt, files, additions: [] };
+    if (contract) task.contract = contract;
+    try {
+      if (spec.worktree) {
+        const dir = join(WORKTREES_DIR, orchestrator.id, `task-${id}`);
+        const branch = `pi-ui/${orchestrator.id}/task-${id}`;
+        task.worktree = { dir, branch, base: await addWorktree(path, dir, branch) };
+        task.setup = params.setup;
+      }
+      made.push(task);
+    } catch (error) {
+      await undo();
+      throw new Error(`The task "${spec.title}" could not start: ${errorText(error)}`);
+    }
+  }
+  // The orchestrator can be removed while the worktrees are made. Then nobody owns them.
+  if (findOrchestrator(orchestrator.file)?.orchestrator !== orchestrator) {
+    await undo();
+    throw new Error("The orchestrator was removed.");
+  }
+  // Phase 2 starts the tasks.
+  tasks.push(...made);
+  for (const task of made) startTask(path, task);
+  return `Started: ${made.map((task) => `${task.id}. ${task.title}`).join(", ")}. An update arrives when the run of each task ends.`;
+}
+
 async function taskTool(path: string, orchestrator: Orchestrator, { name, params }: ToolCall): Promise<string> {
   const { tasks } = orchestrator;
   if (name === "start_tasks") {
-    if (params.tasks.some((spec) => spec.worktree)) await checkRepo(path);
-    const conflict = overlap([...tasks.filter(isActive), ...params.tasks.map(({ title, files = [] }) => ({ title, files }))]);
-    if (conflict) throw new Error(`The owned files overlap: ${conflict}. A file can belong to only one active task.`);
-    // Phase 1 makes all worktrees. When one fails, none of the tasks starts.
-    const first = Math.max(0, ...tasks.map((task) => task.id)) + 1;
-    const made: Task[] = [];
-    const undo = () =>
-      Promise.all(made.flatMap(({ worktree }) => (worktree ? [removeWorktree(path, worktree.dir, worktree.branch).catch(() => {})] : [])));
-    for (const [index, spec] of params.tasks.entries()) {
-      const id = first + index;
-      const { title, prompt, files = [] } = spec;
-      const { contract } = params;
-      const task: Task = { id, title, status: "running", prompt, files, additions: [] };
-      if (contract) task.contract = contract;
-      try {
-        if (spec.worktree) {
-          const dir = join(WORKTREES_DIR, orchestrator.id, `task-${id}`);
-          const branch = `pi-ui/${orchestrator.id}/task-${id}`;
-          task.worktree = { dir, branch, base: await addWorktree(path, dir, branch) };
-          task.setup = params.setup;
-        }
-        made.push(task);
-      } catch (error) {
-        await undo();
-        throw new Error(`The task "${spec.title}" could not start: ${errorText(error)}`);
-      }
-    }
-    // The orchestrator can be removed while the worktrees are made. Then nobody owns them.
-    if (findOrchestrator(orchestrator.file)?.orchestrator !== orchestrator) {
-      await undo();
-      throw new Error("The orchestrator was removed.");
-    }
-    // Phase 2 starts the tasks.
-    tasks.push(...made);
-    for (const task of made) startTask(path, task);
-    return `Started: ${made.map((task) => `${task.id}. ${task.title}`).join(", ")}. An update arrives when the run of each task ends.`;
+    return allocateTasks(path, () => startBatch(path, orchestrator, params));
   }
   if (name === "list_tasks") {
     const lines = tasks.map((task) => {

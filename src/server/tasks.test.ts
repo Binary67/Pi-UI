@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ChatState } from "../shared/chat-state.ts";
 import type { Task } from "./projects.ts";
-import { outside, overlap, runningText, taskPrompt, updateText } from "./tasks.ts";
+import { allocateTasks, outside, overlap, runningText, taskPrompt, updateText } from "./tasks.ts";
 
 function task(id: number, additions: string[] = []): Task {
   return {
@@ -43,6 +43,24 @@ test("owned files overlap when they are equal, or when a folder covers a file", 
 
 test("the changed files outside the owned files", () => {
   assert.deepEqual(outside(task(1), ["src/a.ts", "docs/guide.md", "src/b.ts", "package.json"]), ["src/b.ts", "package.json"]);
+});
+
+test("concurrent allocations check published owners before starting, and a conflict does not block the next batch", async () => {
+  const owners: Task[] = [];
+  const start = (task: Task) => allocateTasks("project", async () => {
+    const conflict = overlap([task], owners);
+    if (conflict) throw new Error(conflict);
+    await Promise.resolve(); // Provision the worktree before publishing its task.
+    owners.push(task);
+    return task.title;
+  });
+  const first = start({ ...plain(1), files: ["src/"] });
+  const conflicting = start({ ...plain(2), files: ["src/app.ts"] });
+  const disjoint = start({ ...plain(3), files: ["docs/"] });
+  assert.equal(await first, "Task 1");
+  await assert.rejects(conflicting, /Task 1/);
+  assert.equal(await disjoint, "Task 3");
+  assert.deepEqual(owners.map(({ id }) => id), [1, 3]);
 });
 
 test("the first prompt of a task with a worktree has its sections in order", () => {

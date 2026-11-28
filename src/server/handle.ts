@@ -137,12 +137,13 @@ async function dropOrchestrator(file: string): Promise<void> {
     release(viewed);
     send(socket, { type: "snapshot", session: null });
   }
-  broadcast(tasksMessage());
-  await broadcastProjects();
   const active = orchestrator.tasks.filter(isActive);
   for (const task of active) task.status = "cancelled";
   // The project folder can be gone. Then the cleanup of a task fails, but the orchestrator still goes.
-  const results = await Promise.allSettled([stopSession(orchestrator.file), ...active.map((task) => closeTask(path, task))]);
+  const cleanup = Promise.allSettled([stopSession(orchestrator.file), ...active.map((task) => closeTask(path, task))]);
+  broadcast(tasksMessage());
+  await broadcastProjects();
+  const results = await cleanup;
   for (const result of results) {
     if (result.status === "rejected") console.error("Could not clean up the orchestrator:", result.reason);
   }
