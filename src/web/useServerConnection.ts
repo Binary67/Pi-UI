@@ -46,6 +46,7 @@ export function useServerConnection({ draft, setSession, setLoading, setErrors, 
   const [listing, setListing] = useState<FolderListing | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [statuses, setStatuses] = useState<Record<string, SessionStatus>>({});
+  const [branchBlocks, setBranchBlocks] = useState<Record<string, string>>({});
   /** The tasks of each orchestrator, by the session file of the orchestrator. */
   const [tasks, setTasks] = useState<Record<string, TaskSummary[]>>({});
   /** The last `branch` message. It counts only while the page shows the session of its file. */
@@ -144,6 +145,7 @@ export function useServerConnection({ draft, setSession, setLoading, setErrors, 
             break;
           case "status":
             setStatuses(data.sessions);
+            setBranchBlocks(data.branchBlocks);
             break;
           case "tasks":
             setTasks(data.tasks);
@@ -248,5 +250,5 @@ export function useServerConnection({ draft, setSession, setLoading, setErrors, 
     socketRef.current?.send(JSON.stringify(message));
   }
 
-  return { send, socketRef, connected, remoteUrl, listing, projects, statuses, tasks, branchState, subagent };
+  return { send, socketRef, connected, remoteUrl, listing, projects, statuses, branchBlocks, tasks, branchState, subagent };
 }

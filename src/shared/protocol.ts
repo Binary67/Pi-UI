@@ -139,7 +139,7 @@ export type ServerMessage =
   | { type: "starting" }
   | { type: "projects"; projects: Project[] }
   /** The status of each live session, by session file. A session that is not in the list is cold. */
-  | { type: "status"; sessions: Record<string, SessionStatus> }
+  | { type: "status"; sessions: Record<string, SessionStatus>; branchBlocks: Record<string, string> }
   /** The tasks of each orchestrator in start order, by the session file of the orchestrator. */
   | { type: "tasks"; tasks: Record<string, TaskSummary[]> }
   | { type: "folders"; listing: FolderListing }

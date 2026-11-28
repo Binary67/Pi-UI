@@ -4,16 +4,18 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { WebSocket } from "ws";
 import type { ClientMessage } from "../shared/protocol.ts";
+import { blockedCheckouts, checkout, refreshCheckouts, switching } from "./checkouts.ts";
 import { listFolders, toPath } from "./folders.ts";
 import {
   broadcast,
   broadcastProjects,
+  broadcastTasks,
   knownModels,
   refresh,
   send,
   sendBranch,
   sendProjectBranches,
-  tasksMessage,
+  statusMessage,
 } from "./messages.ts";
 import {
   addOrchestrator,
@@ -42,6 +44,7 @@ import {
   prepareSpares,
   register,
   release,
+  sendPrompt,
   stopSession,
   takeSpare,
   WORKTREES_DIR,
@@ -141,9 +144,10 @@ async function dropOrchestrator(file: string): Promise<void> {
   for (const task of active) task.status = "cancelled";
   // The project folder can be gone. Then the cleanup of a task fails, but the orchestrator still goes.
   const cleanup = Promise.allSettled([stopSession(orchestrator.file), ...active.map((task) => closeTask(path, task))]);
-  broadcast(tasksMessage());
+  broadcastTasks();
   await broadcastProjects();
   const results = await cleanup;
+  broadcast(statusMessage());
   for (const result of results) {
     if (result.status === "rejected") console.error("Could not clean up the orchestrator:", result.reason);
   }
@@ -228,7 +232,7 @@ export async function handle(socket: WebSocket, message: ClientMessage): Promise
         task.direct = true;
         saveTasks();
       }
-      await session.pi.send({
+      await sendPrompt(session, {
         type: "prompt",
         message: message.text,
         images: message.images,
@@ -248,17 +252,23 @@ export async function handle(socket: WebSocket, message: ClientMessage): Promise
       return sendBranch(socket, session);
     case "switch_branch": {
       if (task) throw new Error("A task session cannot switch the branch.");
-      if ([...sessions.values()].some((other) => other.cwd === session.cwd && other.state.running)) {
-        throw new Error("A session of this project is running. Wait until it ends.");
-      }
-      if (getOrchestrators(session.cwd).some((orchestrator) => orchestrator.tasks.some(isActive))) {
-        throw new Error("An orchestrator of this project has tasks that are running or in review. Finish or cancel them first.");
-      }
       // The startup sweep deletes the `pi-ui/*` branches that no task owns.
       if (message.branch.startsWith("-") || message.branch.startsWith("pi-ui/")) {
         throw new Error("A branch name cannot start with - or pi-ui/.");
       }
-      await switchBranch(session.cwd, message.branch, message.create);
+      // A project may have become a repo since it opened. Resolve identities before the synchronous check and reservation.
+      await refreshCheckouts();
+      const root = checkout(session.cwd);
+      const reason = blockedCheckouts().get(root);
+      if (reason) throw new Error(reason);
+      switching.add(root);
+      broadcast(statusMessage());
+      try {
+        await switchBranch(root, message.branch, message.create);
+      } finally {
+        switching.delete(root);
+        broadcast(statusMessage());
+      }
       return sendProjectBranches(session.cwd);
     }
     case "set_model":

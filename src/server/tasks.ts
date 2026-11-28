@@ -22,6 +22,10 @@ export function isActive(task: Task): boolean {
 // Only the check and allocation of a batch are serialized. Subagents run outside this queue.
 const allocations = new Map<string, Promise<string>>();
 
+export function allocatingTasks(path: string): boolean {
+  return allocations.has(path);
+}
+
 export async function allocateTasks(path: string, allocate: () => Promise<string>): Promise<string> {
   const previous = allocations.get(path) ?? Promise.resolve();
   const run = previous.then(allocate, allocate);

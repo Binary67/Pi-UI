@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -18,6 +18,7 @@ import {
   removeWorktree,
   runSetup,
   switchBranch,
+  worktreeRoot,
 } from "./worktrees.ts";
 
 // The commits of the tests need an identity, also on a machine without a git configuration.
@@ -66,6 +67,11 @@ test("a task branch goes from a new worktree to a merge, then the worktree and t
   const worktree = join(dir, "worktrees", "x", "task-1");
   const branch = "pi-ui/x/task-1";
   const base = await addWorktree(repo, worktree, branch);
+  await mkdir(join(repo, "sub"));
+  const alias = join(dir, "alias");
+  await symlink(join(repo, "sub"), alias);
+  assert.equal(await worktreeRoot(alias), await realpath(repo));
+  assert.equal(await worktreeRoot(worktree), await realpath(worktree));
   assert.equal(base, git(repo, "rev-parse", "HEAD").trim());
   await runSetup(worktree, "mkdir deps && echo ok > deps/lib.txt", new AbortController().signal);
   await assert.rejects(runSetup(worktree, "node -e \"console.error('missing');process.exit(3)\"", new AbortController().signal), /The setup command failed: missing/);

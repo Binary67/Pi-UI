@@ -115,9 +115,9 @@ project. Open it to switch to a local branch. To make a new branch from the
 current commit, type its name in the search field and choose **Create branch**.
 The picker does not show when the folder is not in a git repository.
 
-All sessions of a project share the same folder. A switch changes the files for
-all of them. A switch is blocked while a session of the project runs, or while
-an orchestrator of the project has tasks that are running or in review. The
+All sessions in a Git checkout share its files, even when opened from different
+subfolders. A switch is blocked while a session in that checkout starts or runs, or while
+an orchestrator in the checkout has tasks that are running or in review. The
 picker is then disabled, and its tooltip gives the reason.
 
 A subagent session of a task shows the branch of its work folder: the task branch for a task with a worktree, and

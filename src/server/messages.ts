@@ -1,9 +1,10 @@
 import type { WebSocket } from "ws";
 import type { ModelRef, ServerMessage, SessionInfo, TaskSummary } from "../shared/protocol.ts";
 import type { PiProcess } from "./pi-process.ts";
-import { allTasks, findTask, listProjects, type Task } from "./projects.ts";
+import { blockedCheckouts, checkout, sessionDir } from "./checkouts.ts";
+import { allTasks, listProjects, type Task } from "./projects.ts";
 import { clients, type Session, sessions, views } from "./state.ts";
-import { activity, isActive } from "./tasks.ts";
+import { activity } from "./tasks.ts";
 import { readBranch } from "./worktrees.ts";
 
 export function send(socket: WebSocket, message: ServerMessage): void {
@@ -19,15 +20,6 @@ export function sendToViewers(file: string, message: ServerMessage): void {
   for (const [socket, viewed] of views) if (viewed === file) send(socket, message);
 }
 
-/**
- * The folder where `session` works: the worktree of its task while the task is running or in review, else its project.
- * A task without a worktree works in its project.
- */
-function sessionDir(session: Session): string {
-  const task = findTask(session.file)?.task;
-  return task?.worktree && isActive(task) ? task.worktree.dir : session.cwd;
-}
-
 /** Send the branch of `session` to the page of `socket`. */
 export async function sendBranch(socket: WebSocket, session: Session): Promise<void> {
   send(socket, { type: "branch", file: session.file, branch: await readBranch(sessionDir(session)) });
@@ -37,18 +29,28 @@ export async function sendBranch(socket: WebSocket, session: Session): Promise<v
 export async function sendProjectBranches(cwd: string): Promise<void> {
   const shown = [...views].flatMap(([socket, file]) => {
     const session = sessions.get(file);
-    return session?.cwd === cwd ? [{ socket, session }] : [];
+    return session && checkout(session.cwd) === checkout(cwd) ? [{ socket, session }] : [];
   });
   await Promise.all(shown.map(({ socket, session }) => sendBranch(socket, session)));
 }
 
 export function statusMessage(): ServerMessage {
+  const blocked = blockedCheckouts();
   return {
     type: "status",
+    branchBlocks: Object.fromEntries([...sessions.values()].flatMap((session) => {
+      const reason = blocked.get(checkout(sessionDir(session)));
+      return reason ? [[session.file, reason]] : [];
+    })),
     sessions: Object.fromEntries(
       [...sessions.values()].map((session) => [session.file, session.state.running ? "running" : "warm"] as const),
     ),
   };
+}
+
+export function broadcastTasks(): void {
+  broadcast(tasksMessage());
+  broadcast(statusMessage());
 }
 
 function taskSummary({ id, title, status, file, note, setup }: Task): TaskSummary {

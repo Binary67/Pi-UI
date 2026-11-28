@@ -2,11 +2,12 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyEvent, type ChatState, emptyChatState } from "../shared/chat-state.ts";
-import type { AgentMessage, JsonAgentSessionEvent, SessionEntry } from "../shared/pi-rpc.ts";
+import type { AgentMessage, JsonAgentSessionEvent, RpcCommand, SessionEntry } from "../shared/pi-rpc.ts";
 import type { ModelRef, SessionKind, StreamingBehavior } from "../shared/protocol.ts";
 import {
   broadcast,
   broadcastProjects,
+  broadcastTasks,
   readInfo,
   refreshStats,
   send,
@@ -15,6 +16,7 @@ import {
   statusMessage,
   tasksMessage,
 } from "./messages.ts";
+import { checkout, identifyCheckout, sessionDir, stoppingDirs, switching, SWITCH_IN_PROGRESS } from "./checkouts.ts";
 import { PiProcess } from "./pi-process.ts";
 import {
   activeProjectTasks,
@@ -95,6 +97,7 @@ export const inFlight = new Set<string>();
 async function launch(cwd: string, file?: string, args: string[] = [], dir = cwd): Promise<Session> {
   // Two Pi processes must not write to the same file.
   if (file) await stopping.get(file);
+  await identifyCheckout(dir);
   let session: Session | undefined;
   const pi = new PiProcess(
     dir,
@@ -103,6 +106,10 @@ async function launch(cwd: string, file?: string, args: string[] = [], dir = cwd
       if (!session) return;
       const previous = session.state;
       session.state = applyEvent(previous, event);
+      if (event.type === "agent_start") {
+        session.runStarts++;
+        session.awaitingRun = false;
+      }
       // The page needs only the events that change the chat.
       if (session.state !== previous) sendToViewers(session.file, { type: "event", file: session.file, event });
       // Pi saves the session file when the first user message ends. From then on, the sidebar can list it. An
@@ -152,7 +159,7 @@ async function launch(cwd: string, file?: string, args: string[] = [], dir = cwd
       const found = findTask(session.file);
       if (found?.task.status === "running") {
         toReview(found.path, found.task, `Pi exited with code ${code}.`, session.state);
-        broadcast(tasksMessage());
+        broadcastTasks();
       }
     },
     (name, params) => runTool(session!.file, name, params),
@@ -181,6 +188,9 @@ async function launch(cwd: string, file?: string, args: string[] = [], dir = cwd
     }
     session = {
       cwd,
+      pendingPrompts: 0,
+      runStarts: 0,
+      awaitingRun: false,
       file: state.data.sessionFile!,
       pi,
       state: { ...emptyChatState, messages: messages.reverse() },
@@ -200,6 +210,21 @@ export function register(session: Session): Session {
   sessions.set(session.file, session);
   broadcast(statusMessage());
   return session;
+}
+
+/** Reserve the checkout before writing to Pi, including the gap between a started response and agent_start. */
+export async function sendPrompt(session: Session, command: Extract<RpcCommand, { type: "prompt" }>): Promise<void> {
+  if (switching.has(checkout(sessionDir(session)))) throw new Error(SWITCH_IN_PROGRESS);
+  const starts = session.runStarts;
+  session.pendingPrompts++;
+  broadcast(statusMessage());
+  try {
+    const { data } = await session.pi.send(command);
+    if (data.disposition === "started" && starts === session.runStarts && !session.state.running) session.awaitingRun = true;
+  } finally {
+    session.pendingPrompts--;
+    broadcast(statusMessage());
+  }
 }
 
 /** Start a spare Pi process of each kind for `cwd`, unless one exists. A spare for another project stops. */
@@ -292,7 +317,7 @@ export function release(file: string): void {
   if (inUse(session)) return;
   session.timer = setTimeout(() => {
     // A prompt that waits for its response has not started its run yet. Then the session stays warm longer.
-    if (inUse(session) || session.pi.busy) return release(file);
+    if (inUse(session) || session.pi.busy || session.awaitingRun) return release(file);
     sessions.delete(file);
     stopping.set(file, session.pi.stop().finally(() => stopping.delete(file)));
     broadcast(statusMessage());
@@ -309,14 +334,21 @@ export async function stopSession(file: string): Promise<void> {
   if (session && sessions.get(file) === session) {
     // Out of the map, the session does not report its exit to the pages.
     clearTimeout(session.timer);
+    stoppingDirs.set(session, sessionDir(session));
     sessions.delete(file);
     broadcast(statusMessage());
-    if (session.state.running) {
-      // A Pi process that has died rejects both commands. The process stops next anyway.
-      await session.pi.send({ type: "clear_queue" }).catch(() => {});
-      await session.pi.send({ type: "abort" }).catch(() => {});
-    }
-    stopping.set(file, session.pi.stop().finally(() => stopping.delete(file)));
+    const stop = async () => {
+      if (session.state.running) {
+        await session.pi.send({ type: "clear_queue" }).catch(() => {});
+        await session.pi.send({ type: "abort" }).catch(() => {});
+      }
+      await session.pi.stop();
+    };
+    stopping.set(file, stop().finally(() => {
+      stopping.delete(file);
+      stoppingDirs.delete(session);
+      broadcast(statusMessage());
+    }));
   }
   await stopping.get(file);
 }
@@ -325,6 +357,7 @@ export async function stopSession(file: string): Promise<void> {
 function followTask(session: Session, event: JsonAgentSessionEvent): void {
   const found = findTask(session.file);
   if (!found) return;
+  if (event.type === "tool_execution_start") return broadcast(tasksMessage());
   const { path, task } = found;
   // A task in review runs again when the user sends a message to its subagent directly.
   if (event.type === "agent_start" && task.status === "review") {
@@ -337,7 +370,7 @@ function followTask(session: Session, event: JsonAgentSessionEvent): void {
     const note = event.aborted ? "Stopped by the user." : failed ? `The run failed: ${last.errorMessage}` : undefined;
     toReview(path, task, note, session.state);
   }
-  broadcast(tasksMessage());
+  broadcastTasks();
 }
 
 /** Move a running task to review. Then commit its changes if it has a worktree, and send the task update to the orchestrator. */
@@ -426,7 +459,7 @@ async function deliver(file: string): Promise<void> {
           // The list of the other running tasks is built now, because the update can be held for a long time.
           const others = findOrchestrator(file)?.orchestrator.tasks.filter((item) => item !== task && item.status === "running");
           const full = [text, runningText(others ?? [])].filter(Boolean).join("\n\n");
-          await session.pi.send({
+          await sendPrompt(session, {
             type: "prompt",
             message: `/pi-ui-task ${JSON.stringify({ text: full, details })}`,
             streamingBehavior: "followUp",
@@ -478,7 +511,7 @@ function startTask(path: string, task: Task): void {
 async function launchTask(path: string, task: Task, signal: AbortSignal): Promise<void> {
   Object.assign(task, { status: "running", started: Date.now(), note: undefined });
   saveTasks();
-  broadcast(tasksMessage());
+  broadcastTasks();
   try {
     if (task.worktree && task.setup) await runSetup(task.worktree.dir, task.setup, signal);
     // The task can be cancelled during its setup.
@@ -493,12 +526,12 @@ async function launchTask(path: string, task: Task, signal: AbortSignal): Promis
     // A session records its model, so only a new subagent session gets the choice.
     await applyChoice(session, "subagent");
     if (task.status !== "running") return;
-    await session.pi.send({ type: "prompt", message: taskPrompt(task) });
+    await sendPrompt(session, { type: "prompt", message: taskPrompt(task) });
   } catch (error) {
     // When the Pi process exited, its exit handler already moved the task to review.
     if (task.status === "running") toReview(path, task, `The task could not start: ${errorText(error)}`);
   }
-  broadcast(tasksMessage());
+  broadcastTasks();
 }
 
 /** Stop the subagent of `task`. Then delete its worktree and branch, if it has them. The session moves to the project folder. */
@@ -544,7 +577,7 @@ async function runTool(file: string, name: string, params: unknown): Promise<str
     return await taskTool(found.path, found.orchestrator, { name, params } as ToolCall);
   } finally {
     saveTasks();
-    broadcast(tasksMessage());
+    broadcastTasks();
   }
 }
 
@@ -593,6 +626,7 @@ async function startBatch(path: string, orchestrator: Orchestrator, params: Batc
 async function taskTool(path: string, orchestrator: Orchestrator, { name, params }: ToolCall): Promise<string> {
   const { tasks } = orchestrator;
   if (name === "start_tasks") {
+    if (switching.has(checkout(path))) throw new Error(SWITCH_IN_PROGRESS);
     return allocateTasks(path, () => startBatch(path, orchestrator, params));
   }
   if (name === "list_tasks") {
@@ -626,7 +660,7 @@ async function taskTool(path: string, orchestrator: Orchestrator, { name, params
         return `Task ${task.id} starts again, with the added instructions.`;
       }
       const session = await open(path, task.file);
-      await session.pi.send({ type: "prompt", message: params.text, streamingBehavior: params.mode });
+      await sendPrompt(session, { type: "prompt", message: params.text, streamingBehavior: params.mode });
       return `Sent to task ${task.id}.`;
     }
     case "finish_task": {

@@ -1,5 +1,5 @@
 import { execFile, spawn } from "node:child_process";
-import { readdir, rm } from "node:fs/promises";
+import { readdir, realpath, rm } from "node:fs/promises";
 import { join, sep } from "node:path";
 import { promisify } from "node:util";
 import type { BranchInfo } from "../shared/protocol.ts";
@@ -13,6 +13,11 @@ const OUTPUT_LIMIT = 2000;
 async function git(cwd: string, args: string[]): Promise<string> {
   const { stdout } = await exec("git", args, { cwd, maxBuffer: MAX_BUFFER });
   return stdout;
+}
+
+export async function worktreeRoot(dir: string): Promise<string | undefined> {
+  const top = await git(dir, ["rev-parse", "--show-toplevel"]).catch(() => "");
+  return top ? realpath(top.replace(/\r?\n$/, "")) : undefined;
 }
 
 /**

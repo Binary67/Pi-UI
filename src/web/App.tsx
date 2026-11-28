@@ -58,7 +58,7 @@ export function App() {
   const running = session?.state.running ?? false;
   const showChat = session && !picking && page === null && !loading;
 
-  const { send, socketRef, connected, remoteUrl, listing, projects, statuses, tasks, branchState, subagent } =
+  const { send, socketRef, connected, remoteUrl, listing, projects, statuses, branchBlocks, tasks, branchState, subagent } =
     useServerConnection({ draft, setSession, setLoading, setErrors, setPicking, setCwd, setUsage });
 
   useEffect(() => {
@@ -276,25 +276,8 @@ export function App() {
   const showBoard = showChat && orchestrator;
 
   const branch = session && branchState?.file === session.file ? branchState.branch : null;
-  // The texts are the same as the texts of the server.
   const sessionProject = session && projects.find((item) => item.path === session.cwd);
-  let branchBlock: string | null = null;
-  if (session) {
-    if (taskSession) {
-      branchBlock = "A task session cannot switch the branch.";
-    } else if (
-      sessionProject &&
-      [...sessionProject.sessions, ...sessionProject.orchestrators].some((item) => statuses[item.file] === "running")
-    ) {
-      branchBlock = "A session of this project is running. Wait until it ends.";
-    } else if (
-      sessionProject?.orchestrators.some((item) =>
-        (tasks[item.file] ?? []).some((task) => task.status === "running" || task.status === "review"),
-      )
-    ) {
-      branchBlock = "An orchestrator of this project has tasks that are running or in review. Finish or cancel them first.";
-    }
-  }
+  const branchBlock = taskSession ? "A task session cannot switch the branch." : session && (branchBlocks[session.file] ?? null);
 
   return (
     <div className="app">

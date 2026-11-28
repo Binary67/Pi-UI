@@ -4,6 +4,7 @@ import { parseClientMessage } from "./client-message.ts";
 import { handle, starting } from "./handle.ts";
 import { send, statusMessage, tasksMessage } from "./messages.ts";
 import { allTasks, getOrchestrators, listProjects, loadProjects, projectPaths } from "./projects.ts";
+import { refreshCheckouts } from "./checkouts.ts";
 import { aborts, release, report, WORKTREES_DIR } from "./sessions.ts";
 import { clients, views } from "./state.ts";
 import { isActive } from "./tasks.ts";
@@ -44,6 +45,7 @@ for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
   });
 }
 loadProjects();
+await refreshCheckouts();
 
 // Delete the worktrees and branches that no active task owns. No task can start during the sweep.
 await removeLeftovers(
