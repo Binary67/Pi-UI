@@ -29,6 +29,9 @@ Open http://localhost:5173. The backend listens on `127.0.0.1:3001`.
 Your terminal Pi continues to work normally; the UI starts separate processes
 from the same installation. Pi upgrades may require updating this integration.
 
+If a prompt is rejected or its delivery is uncertain after a disconnect, **Restore draft** recovers its text and
+attachments alongside any newer edits. Check the chat before resending. Drafts stay in the open browser tab.
+
 ## Orchestrator
 
 An orchestrator solves one problem of a project with subagents. The workflow button in a project row of the sidebar

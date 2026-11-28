@@ -55,7 +55,7 @@ export type ClientMessage =
    */
   | { type: "orchestrator"; cwd: string }
   /** Pi uses `streamingBehavior` only during a run. In an idle session, the prompt starts a run. */
-  | { type: "prompt"; file: string; text: string; images: PromptImage[]; streamingBehavior: StreamingBehavior }
+  | { type: "prompt"; id: string; file: string; text: string; images: PromptImage[]; streamingBehavior: StreamingBehavior }
   /** Clear the queue, then stop the run. The queued text comes back in a `restore` message. */
   | { type: "abort"; file: string }
   | { type: "set_model"; file: string; provider: string; modelId: string }
@@ -79,7 +79,7 @@ export type ClientMessage =
   /** Ask for the usage of the last 30 days. The answer is a `usage` message. */
   | { type: "get_usage" }
   /** Ask for the text of a voice recording. `audio` is base64 data without a `data:` URL prefix. */
-  | { type: "transcribe"; audio: string; mimeType: string }
+  | { type: "transcribe"; id: string; file: string; audio: string; mimeType: string }
   /** Ask for a `pong`, to check that the connection is alive. */
   | { type: "ping" };
 
@@ -153,9 +153,10 @@ export type ServerMessage =
   /** The text of the queued messages that an abort removed, for the composer of the session in `file`. */
   | { type: "restore"; file: string; text: string }
   /** The text of the voice recording of a `transcribe` message, for the composer. */
-  | { type: "transcript"; text: string }
+  | { type: "transcript"; id: string; file: string; text: string }
+  | { type: "prompt_accepted"; id: string; file: string }
   /** The usage of each local day of the last 30 days, oldest first, today last. A day without use has zeros. */
   | { type: "usage"; days: UsageDay[] }
   /** The answer to a `ping`. */
   | { type: "pong" }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string; request?: { type: "prompt" | "transcribe"; id: string; file: string } };

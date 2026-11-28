@@ -137,7 +137,7 @@ export function Settings({
   send: (message: ClientMessage) => void;
   onBack?: () => void;
 }) {
-  useEffect(() => send({ type: "get_subagent" }), []);
+  useEffect(() => { send({ type: "get_subagent" }); }, []);
   return (
     <main className="settings">
       <div className="settings-inner">

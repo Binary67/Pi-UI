@@ -21,7 +21,7 @@ const images: Check = (value) =>
 const FIELDS: { [Type in ClientMessage["type"]]: Record<string, Check> } = {
   start: { cwd: text, file: optional(text) },
   orchestrator: { cwd: text },
-  prompt: { file: text, text, images, streamingBehavior: oneOf("steer", "followUp") },
+  prompt: { file: text, text, images, streamingBehavior: oneOf("steer", "followUp"), id: text },
   abort: { file: text },
   set_model: { file: text, provider: text, modelId: text },
   set_thinking_level: { file: text, level: oneOf("off", "minimal", "low", "medium", "high", "xhigh") },
@@ -36,7 +36,7 @@ const FIELDS: { [Type in ClientMessage["type"]]: Record<string, Check> } = {
   remove_session: { file: text },
   list_folders: { path: text },
   get_usage: {},
-  transcribe: { audio: text, mimeType: text },
+  transcribe: { audio: text, mimeType: text, file: text, id: text },
   ping: {},
 };
 

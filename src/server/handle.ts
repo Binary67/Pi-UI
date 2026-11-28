@@ -172,7 +172,7 @@ export async function handle(socket: WebSocket, message: ClientMessage): Promise
     case "list_folders":
       return send(socket, { type: "folders", listing: await listFolders(message.path) });
     case "transcribe":
-      return send(socket, { type: "transcript", text: await transcribe(message.audio, message.mimeType) });
+      return send(socket, { type: "transcript", id: message.id, file: message.file, text: await transcribe(message.audio, message.mimeType) });
     case "get_usage":
       return send(socket, { type: "usage", days: await readUsage(SESSIONS_DIR, new Date()) });
     case "get_subagent":
@@ -238,7 +238,7 @@ export async function handle(socket: WebSocket, message: ClientMessage): Promise
         images: message.images,
         streamingBehavior: message.streamingBehavior,
       });
-      return;
+      return send(socket, { type: "prompt_accepted", id: message.id, file: session.file });
     }
     case "abort": {
       // As with Esc in the TUI, queued messages go back to the composer. Otherwise they run after the abort.

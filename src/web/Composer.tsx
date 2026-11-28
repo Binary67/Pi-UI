@@ -2,7 +2,6 @@ import { X } from "lucide-react";
 import {
   type ClipboardEvent,
   type KeyboardEvent,
-  type RefObject,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -41,14 +40,14 @@ type ComposerProps = {
   running: boolean;
   sessionFile: string;
   atBottom: boolean;
-  socketRef: RefObject<WebSocket | null>;
-  send: (message: ClientMessage) => void;
+  closedTask?: "done" | "cancelled";
+  send: (message: ClientMessage) => boolean;
   onError: (message: string) => void;
 };
 
-export function Composer({ draft, connected, running, sessionFile, atBottom, socketRef, send, onError }: ComposerProps) {
+export function Composer({ draft, connected, running, sessionFile, atBottom, closedTask, send, onError }: ComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const { text, images, transcribing } = useSyncExternalStore(draft.subscribe, draft.get);
+  const { text, images, submission, recordings, recordingError } = useSyncExternalStore(draft.subscribe, draft.get);
   const { setText, setImages } = draft;
 
   // The keyboard of the composer shrinks the page. A reader at the bottom stays at the bottom, above the composer.
@@ -71,14 +70,18 @@ export function Composer({ draft, connected, running, sessionFile, atBottom, soc
 
   function submit(streamingBehavior: StreamingBehavior) {
     // Offline, the text stays in the composer.
-    if (!connected || (!text.trim() && !images.length)) return;
-    send({ type: "prompt", file: sessionFile, text, images, streamingBehavior });
-    setText("");
-    setImages([]);
+    if (!connected || closedTask) return;
+    const pending = draft.submit(sessionFile);
+    if (!pending) return;
+    const { id, text, images } = pending;
+    if (!send({ type: "prompt", id, file: sessionFile, text, images, streamingBehavior })) {
+      draft.finishPrompt(sessionFile, id, "The prompt could not be sent.");
+    }
   }
 
   // Pasted images become attachments. A paste without images inserts its text as usual.
   function onPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    if (closedTask) return;
     const files = [...event.clipboardData.files].filter((file) => IMAGE_TYPES.has(file.type));
     if (!files.length) return;
     event.preventDefault();
@@ -94,53 +97,68 @@ export function Composer({ draft, connected, running, sessionFile, atBottom, soc
   }
 
   return (
-    <div className="composer">
-      {images.length > 0 && (
-        <div className="attachments">
-          {images.map((image, index) => (
-            <div key={index} className="attachment">
-              <img src={`data:${image.mimeType};base64,${image.data}`} alt="" />
-              <button
-                className="attachment-remove"
-                onClick={() => setImages((current) => current.filter((_, i) => i !== index))}
-                title="Remove image"
-              >
-                <X size={12} />
-              </button>
-            </div>
-          ))}
+    <>
+      {closedTask && <div role="status">This task is {closedTask}. Its chat is read-only.</div>}
+      {submission?.error !== undefined && (
+        <div role="alert" className="banner">
+          {submission.error}
+          <button onClick={() => draft.restorePrompt(sessionFile)}>Restore draft</button>
+          <button onClick={() => draft.finishPrompt(sessionFile, submission.id)}>Discard</button>
         </div>
       )}
-      <textarea
-        ref={textareaRef}
-        value={text}
-        onChange={(event) => setText(event.target.value)}
-        onKeyDown={onKeyDown}
-        onPaste={onPaste}
-        placeholder="Message Pi…"
-        rows={1}
-        autoFocus={!TOUCH}
-      />
-      <MicButton
-        disabled={!connected}
-        transcribing={transcribing}
-        onRecord={(audio, mimeType) => {
-          // `send` drops a message without an open socket. The recording can end after the socket closed.
-          if (!socketRef.current) {
-            onError("Not connected. The recording is lost.");
-            return;
-          }
-          draft.waitTranscript(sessionFile);
-          send({ type: "transcribe", audio, mimeType });
-        }}
-        onError={onError}
-      />
-      <SendButton
-        running={connected && running}
-        ready={connected && Boolean(text.trim() || images.length)}
-        onSend={() => submit("steer")}
-        onStop={() => send({ type: "abort", file: sessionFile })}
-      />
-    </div>
+      {recordingError && <div role="alert" className="banner">{recordingError}</div>}
+      <div className="composer">
+        {images.length > 0 && (
+          <div className="attachments">
+            {images.map((image, index) => (
+              <div key={index} className="attachment">
+                <img src={`data:${image.mimeType};base64,${image.data}`} alt="" />
+                {!closedTask && (
+                  <button
+                    className="attachment-remove"
+                    onClick={() => setImages((current) => current.filter((_, i) => i !== index))}
+                    title="Remove image"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        <textarea
+          ref={textareaRef}
+          readOnly={Boolean(closedTask)}
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+          onKeyDown={onKeyDown}
+          onPaste={onPaste}
+          placeholder={closedTask ? "Read-only task" : "Message Pi…"}
+          rows={1}
+          autoFocus={!TOUCH && !closedTask}
+        />
+        {!closedTask && (
+          <>
+            <MicButton
+              disabled={!connected}
+              transcribing={recordings.length > 0}
+              onRecord={(audio, mimeType) => {
+                const id = draft.waitTranscript(sessionFile);
+                if (!send({ type: "transcribe", id, file: sessionFile, audio, mimeType })) {
+                  draft.finishTranscript(sessionFile, id, { error: "The recording could not be sent." });
+                }
+              }}
+              onError={onError}
+            />
+            <SendButton
+              running={connected && running}
+              ready={connected && !submission && Boolean(text.trim() || images.length)}
+              onSend={() => submit("steer")}
+              onStop={() => send({ type: "abort", file: sessionFile })}
+            />
+          </>
+        )}
+      </div>
+    </>
   );
 }

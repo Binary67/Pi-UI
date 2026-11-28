@@ -171,20 +171,24 @@ export function useServerConnection({ draft, setSession, setLoading, setErrors, 
           case "restore":
             draft.setText((current) => [data.text, current].filter((part) => part.trim()).join("\n\n"), data.file);
             break;
+          case "prompt_accepted":
+            draft.finishPrompt(data.file, data.id);
+            break;
           case "transcript":
-            {
-              // The transcript has no file. It belongs to the session that sent the oldest recording.
-              const file = draft.takeTranscript();
-              if (file !== undefined) draft.setText((current) => [current, data.text].filter((part) => part.trim()).join(" "), file);
-            }
+            draft.finishTranscript(data.file, data.id, { text: data.text });
             break;
           case "usage":
             setUsage(data.days);
             break;
           case "error":
+            if (data.request) {
+              const { file, id, type } = data.request;
+              if (type === "prompt") draft.finishPrompt(file, id, data.message);
+              else draft.finishTranscript(file, id, { error: data.message });
+              break;
+            }
             setErrors((current) => [...current, data.message]);
             setLoading(false);
-            draft.dropTranscripts();
             // A failed fork opens no session. Its content must not go to a later session.
             draft.dropFork();
             break;
@@ -211,8 +215,7 @@ export function useServerConnection({ draft, setSession, setLoading, setErrors, 
       socketRef.current = null;
       setConnected(false);
       setLoading(false);
-      // The transcript of a recording is lost with the socket.
-      draft.dropTranscripts();
+      draft.disconnected();
       draft.dropFork();
       timer = setTimeout(connect, delay);
       delay = Math.min(delay * 2, RECONNECT_MAX_MS);
@@ -247,8 +250,14 @@ export function useServerConnection({ draft, setSession, setLoading, setErrors, 
   }, []);
 
   function send(message: ClientMessage) {
-    socketRef.current?.send(JSON.stringify(message));
+    if (socketRef.current?.readyState !== WebSocket.OPEN) return false;
+    try {
+      socketRef.current.send(JSON.stringify(message));
+      return true;
+    } catch {
+      return false;
+    }
   }
 
-  return { send, socketRef, connected, remoteUrl, listing, projects, statuses, branchBlocks, tasks, branchState, subagent };
+  return { send, connected, remoteUrl, listing, projects, statuses, branchBlocks, tasks, branchState, subagent };
 }

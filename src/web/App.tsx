@@ -58,7 +58,7 @@ export function App() {
   const running = session?.state.running ?? false;
   const showChat = session && !picking && page === null && !loading;
 
-  const { send, socketRef, connected, remoteUrl, listing, projects, statuses, branchBlocks, tasks, branchState, subagent } =
+  const { send, connected, remoteUrl, listing, projects, statuses, branchBlocks, tasks, branchState, subagent } =
     useServerConnection({ draft, setSession, setLoading, setErrors, setPicking, setCwd, setUsage });
 
   useEffect(() => {
@@ -232,8 +232,7 @@ export function App() {
       ?.orchestrators.find(
         (item) => item.file === session.file || tasks[item.file]?.some((task) => task.file === session.file),
       );
-  const taskSession =
-    session && Object.values(tasks).some((list) => list.some((task) => task.file === session.file));
+  const taskSession = session && Object.values(tasks).flat().find((task) => task.file === session.file);
   // The server rejects a fork of an orchestrator or a task session.
   const canFork = session && orchestrator?.file !== session.file && !taskSession;
   const view = (message: AgentMessage, key: number | string, extra?: Pick<MessageViewProps, "part" | "children">) => (
@@ -278,6 +277,7 @@ export function App() {
   const branch = session && branchState?.file === session.file ? branchState.branch : null;
   const sessionProject = session && projects.find((item) => item.path === session.cwd);
   const branchBlock = taskSession ? "A task session cannot switch the branch." : session && (branchBlocks[session.file] ?? null);
+  const closedTask = taskSession?.status === "done" || taskSession?.status === "cancelled" ? taskSession.status : undefined;
 
   return (
     <div className="app">
@@ -379,12 +379,13 @@ export function App() {
                   </ul>
                 )}
                 <Composer
+                  key={session.file}
                   draft={draft}
                   connected={connected}
                   running={running}
                   sessionFile={session.file}
                   atBottom={atBottom}
-                  socketRef={socketRef}
+                  closedTask={closedTask}
                   send={send}
                   onError={(message) => setErrors((current) => [...current, message])}
                 />

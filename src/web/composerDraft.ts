@@ -1,13 +1,20 @@
 import type { PromptImage } from "../shared/protocol.ts";
 
 /** What the composer holds. */
-export type Draft = { text: string; images: PromptImage[]; transcribing: boolean };
+type Submission = { id: string; text: string; images: PromptImage[]; error?: string };
+export type Draft = {
+  text: string;
+  images: PromptImage[];
+  submission?: Submission;
+  recordings: string[];
+  recordingError?: string;
+};
 
 /** A new value, or a function of the current value, as with the setter of `useState`. */
 type Update<T> = T | ((current: T) => T);
 
 /** The draft of a session without an entry. */
-const EMPTY: Draft = { text: "", images: [], transcribing: false };
+const EMPTY: Draft = { text: "", images: [], recordings: [] };
 
 /**
  * The drafts of the composer, one for each session file, outside React state. The composer unmounts while the page
@@ -20,20 +27,22 @@ export function createDraft() {
   let current = "";
   /** The content of a fork. The first snapshot of another session than `from` takes it. */
   let fork: { from: string; text: string; images: PromptImage[] } | null = null;
-  /** The files of the recordings that wait for a transcript, oldest first. */
-  let waiting: string[] = [];
   const listeners = new Set<() => void>();
 
   function notify() {
     for (const listener of listeners) listener();
   }
 
+  function patch(file: string, fields: Partial<Draft>) {
+    drafts.set(file, { ...(drafts.get(file) ?? EMPTY), ...fields });
+    if (file === current) notify();
+  }
+
   function change<K extends keyof Draft>(key: K, update: Update<Draft[K]>, file = current) {
     const draft = drafts.get(file) ?? EMPTY;
     const value = typeof update === "function" ? (update as (current: Draft[K]) => Draft[K])(draft[key]) : update;
     if (Object.is(value, draft[key])) return;
-    drafts.set(file, { ...draft, [key]: value });
-    if (file === current) notify();
+    patch(file, { [key]: value });
   }
 
   return {
@@ -60,22 +69,47 @@ export function createDraft() {
     dropFork() {
       fork = null;
     },
-    /** Mark the session in `file` as waiting for the transcript of a recording. */
-    waitTranscript(file: string) {
-      waiting.push(file);
-      change("transcribing", true, file);
+    submit(file: string): Submission | undefined {
+      const draft = drafts.get(file) ?? EMPTY;
+      if (draft.submission || (!draft.text.trim() && !draft.images.length)) return;
+      const submission = { id: crypto.randomUUID(), text: draft.text, images: draft.images };
+      patch(file, { submission, text: "", images: [] });
+      return submission;
     },
-    /** The file of the oldest recording that waits for a transcript. Its flag clears. */
-    takeTranscript() {
-      const file = waiting.shift();
-      if (file !== undefined) change("transcribing", false, file);
-      return file;
+    finishPrompt(file: string, id: string, error?: string) {
+      const pending = drafts.get(file)?.submission;
+      if (pending?.id === id) patch(file, { submission: error === undefined ? undefined : { ...pending, error } });
     },
-    /** Clear all waits, when the transcripts are lost. */
-    dropTranscripts() {
-      const files = waiting;
-      waiting = [];
-      for (const file of files) change("transcribing", false, file);
+    restorePrompt(file: string) {
+      const draft = drafts.get(file);
+      const sent = draft?.submission;
+      if (!draft || !sent) return;
+      patch(file, {
+        text: [sent.text, draft.text].filter(Boolean).join("\n\n"),
+        images: [...sent.images, ...draft.images],
+        submission: undefined,
+      });
+    },
+    waitTranscript(file: string): string {
+      const id = crypto.randomUUID();
+      const recordings = drafts.get(file)?.recordings ?? [];
+      patch(file, { recordings: [...recordings, id], recordingError: undefined });
+      return id;
+    },
+    finishTranscript(file: string, id: string, result: { text: string } | { error: string }) {
+      const draft = drafts.get(file);
+      if (!draft?.recordings.includes(id)) return;
+      const recordings = draft.recordings.filter((item) => item !== id);
+      if ("error" in result) patch(file, { recordings, recordingError: result.error });
+      else patch(file, { recordings, text: [draft.text, result.text].filter((part) => part.trim()).join(" ") });
+    },
+    disconnected() {
+      for (const [file, draft] of drafts) {
+        if (draft.submission && draft.submission.error === undefined) {
+          patch(file, { submission: { ...draft.submission, error: "Delivery was not confirmed. Check the chat before resending." } });
+        }
+        if (draft.recordings.length) patch(file, { recordings: [], recordingError: "Disconnected before the transcript arrived." });
+      }
     },
     setText: (update: Update<string>, file?: string) => change("text", update, file),
     setImages: (update: Update<PromptImage[]>, file?: string) => change("images", update, file),

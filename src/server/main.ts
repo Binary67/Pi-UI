@@ -90,11 +90,16 @@ server.on("connection", (socket) => {
   send(socket, tasksMessage());
   void listProjects().then((projects) => send(socket, { type: "projects", projects }));
 
-  socket.on("message", (data) => {
-    // The parse is inside the chain, so a malformed message gives an error and the server keeps running.
-    Promise.resolve()
-      .then(() => handle(socket, parseClientMessage(String(data))))
-      .catch((error: unknown) => send(socket, { type: "error", message: error instanceof Error ? error.message : String(error) }));
+  socket.on("message", async (data) => {
+    let message;
+    try {
+      message = parseClientMessage(String(data));
+      await handle(socket, message);
+    } catch (error) {
+      const request = message?.type === "prompt" || message?.type === "transcribe"
+        ? { type: message.type, id: message.id, file: message.file } : undefined;
+      send(socket, { type: "error", message: error instanceof Error ? error.message : String(error), request });
+    }
   });
 
   socket.on("close", () => {

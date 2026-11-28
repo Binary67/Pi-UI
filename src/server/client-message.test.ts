@@ -5,6 +5,7 @@ import { parseClientMessage } from "./client-message.ts";
 test("a valid message passes", () => {
   const messages = [
     { type: "ping" },
+    { type: "transcribe", id: "recording", file: "a.jsonl", audio: "abc", mimeType: "audio/mp4" },
     { type: "start", cwd: "/work" },
     { type: "start", cwd: "/work", file: "/work/a.jsonl" },
     { type: "fork", file: "a.jsonl", timestamp: 5 },
@@ -15,6 +16,7 @@ test("a valid message passes", () => {
     { type: "set_subagent_thinking_level", level: "low" },
     {
       type: "prompt",
+      id: "submission",
       file: "a.jsonl",
       text: "Hi",
       images: [{ type: "image", data: "abc", mimeType: "image/png" }],
