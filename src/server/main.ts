@@ -1,8 +1,9 @@
+import { once } from "node:events";
 import { type WebSocket, WebSocketServer } from "ws";
 import { parseClientMessage } from "./client-message.ts";
 import { handle, starting } from "./handle.ts";
 import { send, statusMessage, tasksMessage } from "./messages.ts";
-import { allTasks, getOrchestrators, listProjects, projectPaths } from "./projects.ts";
+import { allTasks, getOrchestrators, listProjects, loadProjects, projectPaths } from "./projects.ts";
 import { aborts, release, report, WORKTREES_DIR } from "./sessions.ts";
 import { clients, views } from "./state.ts";
 import { isActive } from "./tasks.ts";
@@ -25,6 +26,25 @@ const HEARTBEAT_MS = 30 * 1000;
 // The largest message from a page. A voice recording or an image in a prompt arrives as base64 in one message.
 const MAX_MESSAGE_BYTES = 32 * 1024 * 1024;
 
+let ready = false;
+const server = new WebSocketServer({
+  host: HOST,
+  port: PORT,
+  path: "/ws",
+  maxPayload: MAX_MESSAGE_BYTES,
+  verifyClient: ({ origin }: { origin: string }) => ready && ALLOWED_ORIGINS.has(origin),
+});
+// Binding is the single-instance guard. Read the authoritative state only after acquiring it.
+await once(server, "listening");
+// Replaying an update can launch a setup command before the UI is ready.
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+  process.once(signal, () => {
+    for (const abort of aborts.values()) abort.abort();
+    process.kill(process.pid, signal);
+  });
+}
+loadProjects();
+
 // Delete the worktrees and branches that no active task owns. No task can start during the sweep.
 await removeLeftovers(
   WORKTREES_DIR,
@@ -35,34 +55,18 @@ await removeLeftovers(
 );
 
 // The updates that the last server run did not deliver. `report` commits the changes of a worktree task first.
+const recovery: Promise<void>[] = [];
 for (const path of projectPaths()) {
   for (const { tasks } of getOrchestrators(path)) {
     for (const task of tasks.filter((item) => item.status === "review" && item.pending)) {
-      report(path, task, { ...task }).catch((error: unknown) =>
+      recovery.push(report(path, task, { ...task }).catch((error: unknown) =>
         console.error(`Could not send the update of task ${task.id}:`, error),
-      );
+      ));
     }
   }
 }
 
-const server = new WebSocketServer({
-  host: HOST,
-  port: PORT,
-  path: "/ws",
-  maxPayload: MAX_MESSAGE_BYTES,
-  verifyClient: ({ origin }: { origin: string }) => ALLOWED_ORIGINS.has(origin),
-});
-
-server.on("listening", () => console.log(`Pi UI server on ws://${HOST}:${PORT}/ws`));
-
-// A setup command runs in its own process group, so Ctrl+C does not reach it. Aborting kills the group at once. Then the
-// signal goes to the server again, so it ends as it did without the handler.
-for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
-  process.once(signal, () => {
-    for (const abort of aborts.values()) abort.abort();
-    process.kill(process.pid, signal);
-  });
-}
+await Promise.all(recovery);
 
 // The pages that answered the last ping.
 const alive = new WeakSet<WebSocket>();
@@ -99,3 +103,5 @@ server.on("connection", (socket) => {
     if (file) release(file);
   });
 });
+ready = true;
+console.log(`Pi UI server on ws://${HOST}:${PORT}/ws`);

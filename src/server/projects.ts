@@ -41,18 +41,18 @@ export type Orchestrator = { id: string; file: string; tasks: Task[] };
  */
 type StoredProject = { path: string; name?: string; sessions: string[]; unread: string[]; orchestrators: Orchestrator[] };
 
-let projects: StoredProject[] = load();
+let projects: StoredProject[] = [];
 
-function load(): StoredProject[] {
+export function loadProjects(): void {
   try {
     const loaded: StoredProject[] = JSON.parse(readFileSync(FILE, "utf8")).projects;
     // The Pi processes of the last server run have stopped. A task that was running then waits for review.
     for (const task of loaded.flatMap((project) => project.orchestrators.flatMap((item) => item.tasks))) {
       if (task.status === "running") Object.assign(task, { status: "review", note: "Interrupted by a server restart.", pending: true });
     }
-    return loaded;
+    projects = loaded;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
     throw error;
   }
 }
